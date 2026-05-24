@@ -1,0 +1,41 @@
+[project]
+name = "weeee"
+version = "0.0.1"
+description = "Operate wiimote"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.4.6",
+    "scipy>=1.15.0",
+    "hidapi>=0.14.0",
+    "scipy-stubs>=1.17.1.4",
+    "matplotlib>=3.10.9",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.14",
+    "typos>=1.46.2",
+]
+
+[tool.pytest]
+markers = [
+    "constants: marks tests as constants (deselect with '-m \"not slow\"')",
+    "logic: logical tests for Wiimote operations",
+    "motionplus: tests for MotionPlus detection and activation",
+    "ir: tests for IR camera functionality",
+    "memory: tests for memory read/write operations",
+]
+addopts = ["--cov=src", "--cov-report=term-missing", "--cov-report=html"]
+
+[tool.mypy]
+mypy_path = "typings"
+
+strict = true
+
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true

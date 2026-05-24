@@ -118,22 +118,17 @@ class TestDataReportModes:
     def test_report_id_and_structure(self, mode: int, sim: SimulatedHIDDevice) -> None:
         dev = real_open()
 
-        # Set mode (rumble=0, continuous=0).
-        # The Wiimote always replies with a STATUS (0x20) first.
         dev.write([opcode.DATA_REPORTING_MODE.value, 0x00, mode])
         time.sleep(0.05)
 
-        # Consume the STATUS report
         real_read_until(dev, 0x20, 600)
 
-        # Now wait for a data report matching our mode
         real_r = real_read_until(dev, mode, 800)
         dev.close()
 
         if not real_r:
             pytest.skip(f"mode 0x{mode:02x}: no matching report from real device")
 
-        # Simulator: generate a report in the same mode
         prev_mode = sim.reporting_mode
         sim.reporting_mode = mode
         sim_r = sim._generate_data_report()
@@ -143,10 +138,8 @@ class TestDataReportModes:
         assert real_r[0] == mode, f"real report-ID 0x{real_r[0]:02x} != {mode:#04x}"
         assert sim_r[0] == mode, f"sim report-ID 0x{sim_r[0]:02x} != {mode:#04x}"
 
-        # ── Simulator logical size ≤ real HID packet size ──
         assert len(sim_r) <= len(real_r) <= 64
 
-        # ── Buttons always live at bytes 1-2 (accel LSBs may pollute) ──
         assert len(real_r) >= 3
         assert len(sim_r) >= 3
 
@@ -154,24 +147,20 @@ class TestDataReportModes:
         if mode in ACCEL_MODES:
             assert len(real_r) >= 6
             assert len(sim_r) >= 6
-            # Accel bytes 3-5 exist (values differ — live sensor)
             assert all(0x00 <= b <= 0xFF for b in real_r[3:6])
             assert all(0x00 <= b <= 0xFF for b in sim_r[3:6])
 
         # ── Extension modes ──
         if mode in EXT_MODES:
-            # Extension offset in the report varies by mode on the real device
             off = {0x32: 3, 0x34: 3, 0x35: 6, 0x36: 13, 0x37: 16}[mode]
             assert len(real_r) > off
             assert len(sim_r) > 6
 
         # ── IR modes ──
         if mode in IR_EXT_MODES:
-            # Extended IR: 12 bytes at offset 6
             assert len(real_r) >= 18
             assert len(sim_r) >= 18
         if mode in IR_BASIC_MODES:
-            # Basic IR: 10 bytes (5 per 2 dots)
             assert len(real_r) >= 16
             assert len(sim_r) >= 16
 
@@ -198,7 +187,6 @@ class TestButtons:
 
         real_btn = (real_r[1] << 8) | real_r[2]
 
-        # Simulator: produce a report with A+LEFT pressed
         sim.set_buttons(buttons.BUTTON_A.value | buttons.BUTTON_LEFT.value)
         sim.reporting_mode = 0x31
         sim_r = sim._generate_data_report()
@@ -210,7 +198,6 @@ class TestButtons:
         assert 0 <= real_btn <= 0xFFFF
         assert 0 <= sim_btn <= 0xFFFF
 
-        # Encoding scheme: byte 1 = MSB, byte 2 = LSB
         assert (real_r[1] & 0x0F) == ((real_btn >> 8) & 0x0F)
         assert real_r[2] == (real_btn & 0xFF)
         assert (sim_r[1] & 0x0F) == ((sim_btn >> 8) & 0x0F)
@@ -351,22 +338,15 @@ class TestMemoryWrite:
         if not real_ack:
             pytest.skip("no ACK from real device")
 
-        # ── Real-device ACK ──
         assert (
             real_ack[0] == opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
         )
-        # Real HID packets are 22 bytes; header is at bytes 0-5
         assert len(real_ack) >= 6
-        # Byte 3 = acknowledged report opcode
         assert real_ack[3] == opcode.WRITE_MEMORY_AND_REGISTERS.value
-        # Byte 4 = error code (0 = success, non-zero = device-specific error)
-        # The real Wiimote may return error code 7 for writes to an
-        # uninitialised extension I²C bus — the structure is still valid.
         assert 0 <= real_ack[4] <= 7
 
         # ── Simulator ACK (via _enqueue_ack) ──
         sim._enqueue_ack(opcode.WRITE_MEMORY_AND_REGISTERS.value, 0)
-        # peek at the queue before read() drains it
         ack_from_queue = sim.response_queue[0]
         assert (
             ack_from_queue[0]
@@ -391,7 +371,6 @@ class TestExtensionDetection:
     def test_mp_id_read(self, sim: SimulatedHIDDevice) -> None:
         dev = real_open()
 
-        # 1) Init extension port
         dev.write(
             [
                 opcode.WRITE_MEMORY_AND_REGISTERS.value,
@@ -408,7 +387,6 @@ class TestExtensionDetection:
             dev, opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value, 1000
         )
 
-        # 2) Disable encryption
         dev.write(
             [
                 opcode.WRITE_MEMORY_AND_REGISTERS.value,
@@ -425,7 +403,6 @@ class TestExtensionDetection:
             dev, opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value, 1000
         )
 
-        # 3) Init MotionPlus bus
         dev.write(
             [
                 opcode.WRITE_MEMORY_AND_REGISTERS.value,
@@ -442,8 +419,6 @@ class TestExtensionDetection:
             dev, opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value, 1000
         )
 
-        # 4) Read MP ID (6 bytes from 0xA600FA)
-        # Bytes 2-4 are address in MSB-first order (0xA6, 0x00, 0xFA → 0xA600FA)
         dev.write(
             [
                 opcode.READ_MEMORY_AND_REGISTERS.value,
@@ -468,16 +443,12 @@ class TestExtensionDetection:
         sim.set_motion_plus(True)
         wm = Lowlevel_Wiimote(device=sim)
 
-        # 1) Init ext port → triggers set_motion_plus_active(False)
         wm.write_register(EXTENSION_INIT_ENABLE_ADDRESS, 0x55)
 
-        # 2) Disable encryption
         wm.write_register(EXTENSION_INIT_DISABLE_ENCRYPTION_ADDRESS, 0x00)
 
-        # 3) Init MP bus → with my fix populates the MP ID
         wm.write_register(MOTION_PLUS_INIT_ADDRESS, 0x55)
 
-        # 4) Read MP ID (0xA600FA, MSB-first)
         sim.write(
             [
                 opcode.READ_MEMORY_AND_REGISTERS.value,

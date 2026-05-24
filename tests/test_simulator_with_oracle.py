@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.wiimote import (
+from src.weeee.wiimote import (
     Lowlevel_Wiimote,
     Wiimote,
     opcode,
@@ -36,7 +36,7 @@ from src.wiimote import (
     MOTION_PLUS_ID_PREFIX,
     MOTION_PLUS_ID_PREFIX_TR,
 )
-from src.simulator import SimulatedHIDDevice
+from src.weeee.simulator import SimulatedHIDDevice
 
 
 # ── module-level skip ───────────────────────────────────────────────────

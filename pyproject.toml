@@ -1,16 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "weeee"
 version = "0.0.1"
-description = "Operate wiimote"
+description = "weeee is communicator with wiimote"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.4.6",
     "scipy>=1.15.0",
     "hidapi>=0.14.0",
-    "scipy-stubs>=1.17.1.4",
-    "matplotlib>=3.10.9",
 ]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: MIT License",
+    "Operating System :: Windows",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [dependency-groups]
 dev = [
@@ -19,9 +30,10 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.15.14",
     "typos>=1.46.2",
+    "scipy-stubs>=1.17.1.4",
 ]
 
-[tool.pytest]
+[tool.pytest.ini_options]
 markers = [
     "constants: marks tests as constants (deselect with '-m \"not slow\"')",
     "logic: logical tests for Wiimote operations",

@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 import math
 from scipy.spatial.transform import Rotation as R
-from src.imu_fusion import ImuFusion, accel_to_rotation, decode_gyro
+from src.weeee.imu_fusion import ImuFusion, accel_to_rotation, decode_gyro
 
 
 def test_accel_to_rotation_identity() -> None:

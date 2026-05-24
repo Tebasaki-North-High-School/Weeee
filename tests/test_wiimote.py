@@ -2,7 +2,7 @@ import pytest
 import time
 from collections.abc import Generator
 
-from src.wiimote import (
+from src.weeee.wiimote import (
     Wiimote,
     opcode,
     VENDOR_ID,
@@ -22,7 +22,7 @@ from src.wiimote import (
     MOTION_PLUS_ID_ADDRESS,
     MOTION_PLUS_ACTIVATE_ADDRESS,
 )
-from src.simulator import SimulatedHIDDevice
+from src.weeee.simulator import SimulatedHIDDevice
 
 
 @pytest.fixture

@@ -1,7 +1,7 @@
 import pytest
 from collections.abc import Generator
-from src.wiimote import Wiimote, Lowlevel_Wiimote, buttons, opcode
-from src.simulator import SimulatedHIDDevice
+from src.weeee.wiimote import Wiimote, Lowlevel_Wiimote, buttons, opcode
+from src.weeee.simulator import SimulatedHIDDevice
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ def test_activation_without_set_motion_plus_fails_at_stream_check() -> None:
     sim_device.open()
 
     # Set MP ID manually without calling set_motion_plus()
-    from src.wiimote import MOTION_PLUS_ID_ADDRESS
+    from src.weeee.wiimote import MOTION_PLUS_ID_ADDRESS
 
     sim_device.memory[MOTION_PLUS_ID_ADDRESS : MOTION_PLUS_ID_ADDRESS + 6] = [
         0x00,
@@ -166,12 +166,12 @@ def test_motion_plus_init_populates_id() -> None:
     sim_device.set_motion_plus(True)
 
     # Clear the ID bytes
-    from src.wiimote import MOTION_PLUS_ID_ADDRESS
+    from src.weeee.wiimote import MOTION_PLUS_ID_ADDRESS
 
     sim_device.memory[MOTION_PLUS_ID_ADDRESS : MOTION_PLUS_ID_ADDRESS + 6] = [0] * 6
 
     # Simulate the init write
-    from src.wiimote import MOTION_PLUS_INIT_ADDRESS
+    from src.weeee.wiimote import MOTION_PLUS_INIT_ADDRESS
 
     wiim_low = Lowlevel_Wiimote(device=sim_device)
     wiim_low.write_register(MOTION_PLUS_INIT_ADDRESS, 0x55)
@@ -273,7 +273,7 @@ def test_read_with_timeout_still_returns_data(
     sim_device.response_queue.clear()
     sim_device.reporting_mode = 0x30
     sim_device.set_buttons(buttons.BUTTON_A.value)
-    result = sim_device.read(64, timeout=50)
+    result = sim_device.read(64, timeout_ms=50)
     assert result != []
     assert result[0] == 0x30
     assert (result[1] << 8) | result[2] == buttons.BUTTON_A.value
@@ -288,7 +288,7 @@ def test_read_non_blocking_returns_data_immediately(
     sim_device.response_queue.clear()
     sim_device.reporting_mode = 0x30
     sim_device.set_buttons(buttons.BUTTON_HOME.value)
-    result = sim_device.read(64, timeout=0)
+    result = sim_device.read(64, timeout_ms=0)
     assert result[0] == 0x30
     assert (result[1] << 8) | result[2] == buttons.BUTTON_HOME.value
 
@@ -303,7 +303,7 @@ def test_continuous_reporting_ignores_timeout(
     sim_device.reporting_mode = 0x31
     sim_device.continuous_reporting = True
     sim_device.response_queue.clear()
-    result = sim_device.read(64, timeout=100)
+    result = sim_device.read(64, timeout_ms=100)
     assert result[0] == 0x31
 
 

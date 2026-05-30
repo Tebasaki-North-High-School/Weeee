@@ -1,7 +1,7 @@
 import pytest
 from collections.abc import Generator
-from src.weeee.wiimote import Wiimote, Lowlevel_Wiimote, buttons, opcode
-from src.weeee.simulator import SimulatedHIDDevice
+from weeee.core import Wiimote, Lowlevel_Wiimote, buttons, opcode
+from weeee.simulator import SimulatedHIDDevice
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ def test_activation_without_set_motion_plus_fails_at_stream_check() -> None:
     sim_device.open()
 
     # Set MP ID manually without calling set_motion_plus()
-    from src.weeee.wiimote import MOTION_PLUS_ID_ADDRESS
+    from weeee.core import MOTION_PLUS_ID_ADDRESS
 
     sim_device.memory[MOTION_PLUS_ID_ADDRESS : MOTION_PLUS_ID_ADDRESS + 6] = [
         0x00,
@@ -166,12 +166,12 @@ def test_motion_plus_init_populates_id() -> None:
     sim_device.set_motion_plus(True)
 
     # Clear the ID bytes
-    from src.weeee.wiimote import MOTION_PLUS_ID_ADDRESS
+    from weeee.core import MOTION_PLUS_ID_ADDRESS
 
     sim_device.memory[MOTION_PLUS_ID_ADDRESS : MOTION_PLUS_ID_ADDRESS + 6] = [0] * 6
 
     # Simulate the init write
-    from src.weeee.wiimote import MOTION_PLUS_INIT_ADDRESS
+    from weeee.core import MOTION_PLUS_INIT_ADDRESS
 
     wiim_low = Lowlevel_Wiimote(device=sim_device)
     wiim_low.write_register(MOTION_PLUS_INIT_ADDRESS, 0x55)

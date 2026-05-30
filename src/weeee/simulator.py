@@ -1,8 +1,13 @@
+"""
+Wiimote Simulator module.
+Provides a simulated HID device that mimics Wiimote hardware behavior for testing and development.
+"""
+
 import hid
 
 from typing import Optional, List, TypedDict
 
-from .wiimote import (
+from .core import (
     opcode,
     VENDOR_ID,
     PRODUCT_ID,
@@ -13,7 +18,10 @@ from .wiimote import (
     MOTION_PLUS_INIT_ADDRESS,
 )
 
+
 class _gyro(TypedDict):
+    """Internal dictionary for storing simulated gyroscope state."""
+
     yaw: int
     pitch: int
     roll: int
@@ -25,9 +33,11 @@ class _gyro(TypedDict):
 class SimulatedHIDDevice(hid.device):
     """
     A class that mimics the hid.device interface for simulating a Wiimote.
+    It simulates memory, registers, and various data reporting modes.
     """
 
     def __init__(self) -> None:
+        """Initializes the simulated Wiimote with default state and calibration data."""
         self.is_open = False
         self.path: Optional[bytes] = None
         self.serial_number: Optional[str] = None
@@ -72,6 +82,12 @@ class SimulatedHIDDevice(hid.device):
         self._motion_plus_hardware_present = False
 
     def set_motion_plus(self, connected: bool = True) -> None:
+        """
+        Simulates connecting or disconnecting MotionPlus hardware.
+
+        Args:
+            connected: True if MotionPlus is present.
+        """
         self._motion_plus_hardware_present = connected
         if connected:
             # MotionPlus ID at 0xA600FA
@@ -90,6 +106,12 @@ class SimulatedHIDDevice(hid.device):
             self.set_motion_plus_active(False)
 
     def set_motion_plus_active(self, active: bool = True) -> None:
+        """
+        Simulates activating or deactivating the MotionPlus extension.
+
+        Args:
+            active: True if MotionPlus should be active.
+        """
         if active:
             # Active ID at 0xA400FA
             self.memory[EXTENSION_ID_ADDRESS : EXTENSION_ID_ADDRESS + 6] = [
@@ -111,17 +133,42 @@ class SimulatedHIDDevice(hid.device):
         product_id: int = PRODUCT_ID,
         serial_number: Optional[str] = None,
     ) -> None:
+        """
+        Simulates opening the HID device.
+
+        Args:
+            vendor_id: USB Vendor ID.
+            product_id: USB Product ID.
+            serial_number: Optional serial number.
+        """
         self.is_open = True
         self.serial_number = serial_number
 
     def open_path(self, device_path: bytes) -> None:
+        """
+        Simulates opening the HID device by its path.
+
+        Args:
+            device_path: The device path.
+        """
         self.is_open = True
         self.path = device_path
 
     def close(self) -> None:
+        """Simulates closing the HID device."""
         self.is_open = False
 
     def write(self, data: bytes | List[int]) -> int:
+        """
+        Simulates writing a report to the Wiimote.
+        Handles various opcodes like rumble, LEDs, reporting mode, and memory operations.
+
+        Args:
+            data: The raw report data to write.
+
+        Returns:
+            The number of bytes "written".
+        """
         if not self.is_open:
             raise IOError("Device not open")
 
@@ -190,6 +237,17 @@ class SimulatedHIDDevice(hid.device):
         return len(data)
 
     def read(self, max_length: int, timeout_ms: int = 0) -> List[int]:
+        """
+        Simulates reading a report from the Wiimote.
+        Drains response queue (status, memory) first, then generates live data reports.
+
+        Args:
+            max_length: Maximum length of data to read.
+            timeout_ms: Timeout in milliseconds.
+
+        Returns:
+            A list of integers representing the report data.
+        """
         if not self.is_open:
             raise IOError("Device not open")
 
@@ -211,6 +269,7 @@ class SimulatedHIDDevice(hid.device):
         return self._generate_data_report()
 
     def _enqueue_status_report(self) -> None:
+        """Enqueues a status report (0x20) into the response queue."""
         report = [0] * 7
         report[0] = opcode.STATUS_INFORMATION.value
         report[1] = (self.buttons >> 8) & 0xFF
@@ -223,6 +282,7 @@ class SimulatedHIDDevice(hid.device):
         self.response_queue.append(report)
 
     def _enqueue_ack(self, report_id: int, error_code: int) -> None:
+        """Enqueues an acknowledgment report (0x22) into the response queue."""
         report = [0] * 6
         report[0] = opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
         report[1] = (self.buttons >> 8) & 0xFF
@@ -232,6 +292,7 @@ class SimulatedHIDDevice(hid.device):
         self.response_queue.append(report)
 
     def _enqueue_read_report(self, addr: int, size: int) -> None:
+        """Enqueues memory read data reports (0x21) into the response queue."""
         remaining = size
         current_addr = addr
         while remaining > 0:
@@ -253,6 +314,7 @@ class SimulatedHIDDevice(hid.device):
             remaining -= chunk_size
 
     def _generate_data_report(self) -> List[int]:
+        """Generates a live data report based on the current reporting mode."""
         report_1 = (self.buttons >> 8) & 0xFF
         report_2 = self.buttons & 0xFF
 
@@ -469,9 +531,21 @@ class SimulatedHIDDevice(hid.device):
         return report
 
     def set_buttons(self, button_mask: int) -> None:
+        """
+        Sets the state of the buttons.
+
+        Args:
+            button_mask: A bitmask of buttons.
+        """
         self.buttons = button_mask
 
     def set_accel(self, x: int, y: int, z: int) -> None:
+        """
+        Sets the accelerometer values.
+
+        Args:
+            x, y, z: Accelerometer values (0-1023).
+        """
         self.accel = (x, y, z)
 
     def set_gyro(
@@ -483,6 +557,13 @@ class SimulatedHIDDevice(hid.device):
         roll_slow: bool = True,
         pitch_slow: bool = True,
     ) -> None:
+        """
+        Sets the gyroscope values and their sensitivity modes.
+
+        Args:
+            yaw, roll, pitch: Gyroscope values (0-16383).
+            yaw_slow, roll_slow, pitch_slow: True for "slow" (high sensitivity) mode.
+        """
         self.gyro = {
             "yaw": yaw,
             "roll": roll,

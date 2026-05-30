@@ -5,8 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "weeee"
 version = "0.0.1"
-description = "weeee is communicator with wiimote"
+description = "A Python library for high-performance Wiimote communication, featuring MotionPlus support and IMU fusion."
 readme = "README.md"
+authors = [
+    { name = "YurufuwaKaisen" },
+]
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.4.6",
@@ -14,11 +17,20 @@ dependencies = [
     "hidapi>=0.14.0",
 ]
 
+keywords = ["wiimote", "nintendo", "imu", "motionplus", "hid", "sensor-fusion"]
+
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python :: 3",
-    "License :: MIT License",
-    "Operating System :: Windows",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
 ]
+
+[project.urls]
+Repository = "https://github.com/Tebasaki-North-High-School/Weeee.git"
+"Bug Tracker" = "https://github.com/Tebasaki-North-High-School/Weeee/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

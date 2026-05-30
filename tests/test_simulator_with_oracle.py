@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.weeee.wiimote import (
+from weeee.core import (
     Lowlevel_Wiimote,
     Wiimote,
     opcode,
@@ -36,7 +36,7 @@ from src.weeee.wiimote import (
     MOTION_PLUS_ID_PREFIX,
     MOTION_PLUS_ID_PREFIX_TR,
 )
-from src.weeee.simulator import SimulatedHIDDevice
+from weeee.simulator import SimulatedHIDDevice
 
 
 # ── module-level skip ───────────────────────────────────────────────────
@@ -225,7 +225,7 @@ class TestStatusReport:
         assert real_r[0] == opcode.STATUS_INFORMATION.value
         assert sim_r[0] == opcode.STATUS_INFORMATION.value
 
-        for label, r in [("real", real_r), ("sim", sim_r)]:
+        for _, r in [("real", real_r), ("sim", sim_r)]:
             assert len(r) >= 7
             leds = (r[3] >> 4) & 0x0F
             flags = r[3] & 0x0F

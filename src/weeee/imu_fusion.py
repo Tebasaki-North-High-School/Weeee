@@ -1,3 +1,8 @@
+"""
+IMU Fusion module for calculating orientation from accelerometer and gyroscope data.
+Specifically designed for Wiimote with MotionPlus extension.
+"""
+
 import math
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -17,6 +22,14 @@ def accel_to_rotation(ax: np.float64, ay: np.float64, az: np.float64) -> R:
     Creates a rotation that aligns the measured acceleration vector (body frame)
     with the world gravity vector [0, 0, 1].
     This avoids Euler singularities during initialization.
+
+    Args:
+        ax: Acceleration in X axis.
+        ay: Acceleration in Y axis.
+        az: Acceleration in Z axis.
+
+    Returns:
+        A scipy Rotation object representing the orientation.
     """
     mag = math.sqrt(ax**2 + ay**2 + az**2)
     if mag < 1e-6:
@@ -47,17 +60,42 @@ def accel_to_rotation(ax: np.float64, ay: np.float64, az: np.float64) -> R:
 
 
 def decode_gyro(val: int, bias: float, slow: bool = False) -> float:
+    """
+    Decodes raw gyroscope value to radians per second.
+
+    Args:
+        val: Raw gyroscope value.
+        bias: Calculated bias (zero-point).
+        slow: True if the gyro is in "slow" mode (high sensitivity).
+
+    Returns:
+        Angular velocity in radians per second.
+    """
     v = val - bias
     scale = 0.05 if slow else 0.227
     return math.radians(v * scale)
 
 
 def is_plausible_gyro(v: int) -> bool:
+    """
+    Checks if the raw gyroscope value is within a plausible range.
+
+    Args:
+        v: Raw gyroscope value.
+
+    Returns:
+        True if plausible, False otherwise.
+    """
     return 0 < v < 0x3FFF
 
 
 class ImuFusion:
+    """
+    Fuses accelerometer and gyroscope data to maintain an estimate of orientation.
+    """
+
     def __init__(self) -> None:
+        """Initializes the IMU fusion state."""
         self.orient: R = R.identity()
         self._orient_prev = R.identity()
         self.gyro_bias = {"yaw": 8192.0, "roll": 8192.0, "pitch": 8192.0}
@@ -66,6 +104,15 @@ class ImuFusion:
         self._first_frame = True
 
     def calibrate_gyro(self, samples: list[dict[str, int]]) -> dict[str, float]:
+        """
+        Calculates and sets the gyroscope bias from a list of samples.
+
+        Args:
+            samples: A list of dictionaries containing raw "yaw", "roll", and "pitch" values.
+
+        Returns:
+            A dictionary containing the calculated bias for each axis.
+        """
         bias = {
             k: sum(s[k] for s in samples) / len(samples)
             for k in ("yaw", "roll", "pitch")
@@ -86,6 +133,15 @@ class ImuFusion:
         Updates orientation using accelerometer and optional gyroscope data.
         Wiimote axes: X-right, Y-forward, Z-up.
         Fusion axes: X-forward (Wiimote Y), Y-left (Wiimote -X), Z-up (Wiimote Z).
+
+        Args:
+            ax, ay, az: Accelerometer values in Wiimote frame.
+            gyro: Optional raw gyroscope values.
+            dt: Time delta since last update.
+            gyro_slow: Optional flags indicating if gyro axes are in slow mode.
+
+        Returns:
+            A tuple of (yaw, pitch, roll) in radians.
         """
         if gyro_slow is None:
             gyro_slow = {"roll": False, "pitch": False, "yaw": False}

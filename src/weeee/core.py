@@ -1,3 +1,8 @@
+"""
+Core Wiimote communication module.
+Handles low-level HID reports, memory operations, and high-level Wiimote logic including MotionPlus.
+"""
+
 import time
 import hid
 
@@ -16,6 +21,8 @@ PRODUCT_ID_TR = 0x0330
 
 # Buttons bitmask
 class buttons(Enum):
+    """Bitmasks for Wiimote buttons."""
+
     BUTTON_LEFT = 0x0100
     BUTTON_RIGHT = 0x0200
     BUTTON_DOWN = 0x0400
@@ -31,6 +38,8 @@ class buttons(Enum):
 
 
 class opcode(Enum):
+    """Operation codes for Wiimote HID reports."""
+
     # Output report
     RUMBLE = 0x10
     PLAYER_LEDS = 0x11
@@ -86,9 +95,21 @@ MOTION_PLUS_ACTIVE_REPORT_LENGTH = 6
 
 
 class Lowlevel_Wiimote:
+    """
+    Handles low-level communication with the Wiimote using HID reports.
+    Parses raw reports into basic state (buttons, accel, IR, extension).
+    """
+
     def __init__(
         self, target: Optional[bytes | str] = None, device: Optional[hid.device] = None
     ) -> None:
+        """
+        Initializes the low-level Wiimote interface.
+
+        Args:
+            target: HID path (bytes) or serial number (str) of the Wiimote.
+            device: Optional existing hid.device instance.
+        """
         if device is not None:
             self.device = device
         else:
@@ -120,13 +141,21 @@ class Lowlevel_Wiimote:
         self._extension_fresh = False
 
     def close(self) -> None:
+        """Closes the HID device connection."""
         self.device.close()
 
     def _send_report(self, report_id: int, *payload: int) -> None:
+        """Sends an output report to the Wiimote."""
         data = [report_id] + list(payload)
         self.device.write(data)
 
     def rumble(self, is_rumble: bool) -> None:
+        """
+        Sets the rumble state of the Wiimote.
+
+        Args:
+            is_rumble: True to enable rumble, False to disable.
+        """
         self.is_rumble = is_rumble
         rumble_arg = 0x01 if self.is_rumble else 0x00
         self._send_report(opcode.RUMBLE.value, rumble_arg)
@@ -134,6 +163,12 @@ class Lowlevel_Wiimote:
     def player_led(
         self, p1: bool = False, p2: bool = False, p3: bool = False, p4: bool = False
     ) -> None:
+        """
+        Sets the player LEDs on the Wiimote.
+
+        Args:
+            p1, p2, p3, p4: True to enable the corresponding LED.
+        """
         led_arg = 0x00
         if p1:
             led_arg |= 0x10
@@ -148,16 +183,31 @@ class Lowlevel_Wiimote:
         self.leds = led_arg >> 4
 
     def set_reporting_mode(self, mode: int, continuous: bool = False) -> None:
+        """
+        Sets the data reporting mode of the Wiimote.
+
+        Args:
+            mode: The reporting mode opcode (e.g. 0x30, 0x31).
+            continuous: True for continuous reporting, False for reporting on change.
+        """
         tt = 0x04 if continuous else 0x00
         tt |= 0x01 if self.is_rumble else 0x00
         self._send_report(opcode.DATA_REPORTING_MODE.value, tt, mode)
 
     def request_status(self) -> None:
+        """Requests a status report from the Wiimote."""
         self._send_report(
             opcode.STATUS_INFORMATION_REQUEST.value, (0x01 if self.is_rumble else 0x00)
         )
 
     def write_register(self, address: int, data: int | bytes | list[int]) -> None:
+        """
+        Writes data to the Wiimote's memory or registers.
+
+        Args:
+            address: The memory address to write to.
+            data: The data to write (int, bytes, or list of ints).
+        """
         if isinstance(data, int):
             data = [data]
         rumble_arg = 0x01 if self.is_rumble else 0x00
@@ -175,6 +225,13 @@ class Lowlevel_Wiimote:
             time.sleep(0.05)
 
     def read_memory(self, address: int, size: int) -> None:
+        """
+        Requests a memory read from the Wiimote.
+
+        Args:
+            address: The memory address to read from.
+            size: The number of bytes to read.
+        """
         rumble_arg = 0x01 if self.is_rumble else 0x00
         mm = rumble_arg
         if address >= 0xA20000:
@@ -186,6 +243,13 @@ class Lowlevel_Wiimote:
         )
 
     def init_ir(self, mode: int = 3, sensitivity: int = 3) -> None:
+        """
+        Initializes the IR camera.
+
+        Args:
+            mode: IR reporting mode.
+            sensitivity: IR sensitivity level (1-5).
+        """
         rumble_arg = 0x01 if self.is_rumble else 0x00
         self._send_report(opcode.IR_CAMERA_ENABLE.value, 0x04 | rumble_arg)
         self._send_report(opcode.IR_CAMERA_ENABLE_2.value, 0x04 | rumble_arg)
@@ -197,6 +261,7 @@ class Lowlevel_Wiimote:
         self.write_register(0xB00030, 0x08)
 
     def init_speaker(self) -> None:
+        """Initializes the Wiimote speaker."""
         rumble_arg = 0x01 if self.is_rumble else 0x00
         self._send_report(opcode.SPEAKER_ENABLE.value, 0x04 | rumble_arg)
         self._send_report(opcode.SPEAKER_MUTE.value, 0x04 | rumble_arg)
@@ -207,6 +272,15 @@ class Lowlevel_Wiimote:
         self._send_report(opcode.SPEAKER_MUTE.value, 0x00 | rumble_arg)
 
     def read(self, timeout: int = 0) -> Optional[int]:
+        """
+        Reads a report from the Wiimote and updates state.
+
+        Args:
+            timeout: Timeout in milliseconds.
+
+        Returns:
+            The report ID opcode if a report was read, None otherwise.
+        """
         data = self.device.read(64, timeout)
         if not data:
             return None
@@ -260,6 +334,7 @@ class Lowlevel_Wiimote:
         return report_id
 
     def _parse_accel(self, data: list[int]) -> None:
+        """Parses accelerometer data from a report."""
         xx, yy, zz = data
         # report[1] bits 6-5 are X<1:0>
         x_lsb = (self.buttons >> 13) & 0x03
@@ -269,6 +344,7 @@ class Lowlevel_Wiimote:
         self.accel = ((xx << 2) | x_lsb, (yy << 2) | y_lsb, (zz << 2) | z_lsb)
 
     def _parse_ir_basic(self, data: list[int]) -> None:
+        """Parses basic IR data (up to 4 points, 10 bits each)."""
         for i in range(2):
             base = i * 5
             b = data[base : base + 5]
@@ -280,6 +356,7 @@ class Lowlevel_Wiimote:
             self.ir[i * 2 + 1] = (x2, y2) if x2 < 1023 or y2 < 1023 else None
 
     def _parse_ir_extended(self, data: list[int]) -> None:
+        """Parses extended IR data (up to 4 points, 10 bits each)."""
         for i in range(4):
             base = i * 3
             b = data[base : base + 3]
@@ -288,6 +365,7 @@ class Lowlevel_Wiimote:
             self.ir[i] = (x, y) if x < 1023 or y < 1023 else None
 
     def _handle_interleaved(self, report_id: int, data: list[int]) -> None:
+        """Handles interleaved reports (0x3e and 0x3f) for high-bandwidth data."""
         self._interleaved_buffer[report_id] = list(data)
         if self._interleaved_buffer[0x3E] and self._interleaved_buffer[0x3F]:
             d3e = self._interleaved_buffer[0x3E]
@@ -316,12 +394,24 @@ class Lowlevel_Wiimote:
 
 
 class Wiimote(Lowlevel_Wiimote):
+    """
+    High-level Wiimote class with calibration, MotionPlus support, and convenience methods.
+    """
+
     def __init__(
         self,
         target: Optional[str | bytes] = None,
         require_motion_plus: bool = False,
         device: Optional[hid.device] = None,
     ) -> None:
+        """
+        Initializes the Wiimote.
+
+        Args:
+            target: HID path or serial number. If None, finds the first available Wiimote.
+            require_motion_plus: If True, attempts to activate MotionPlus and raises error if it fails.
+            device: Optional existing hid.device instance.
+        """
         detected_product_id: Optional[int] = None
         if device is None and target is None:
             # Find first Wiimote
@@ -359,10 +449,12 @@ class Wiimote(Lowlevel_Wiimote):
 
     @staticmethod
     def is_motion_plus_id(extension_id: bytes) -> bool:
+        """Checks if the extension ID matches a MotionPlus in inactive state."""
         return len(extension_id) == 6 and extension_id[:4] == MOTION_PLUS_ID_PREFIX
 
     @staticmethod
     def is_motion_plus_active_id(extension_id: bytes) -> bool:
+        """Checks if the extension ID matches an active MotionPlus."""
         return (
             extension_id == MOTION_PLUS_ACTIVE_ID
             or extension_id == MOTION_PLUS_ACTIVE_ID_TR
@@ -370,10 +462,20 @@ class Wiimote(Lowlevel_Wiimote):
 
     @staticmethod
     def is_zero_extension_id(extension_id: bytes) -> bool:
+        """Checks if the extension ID is all zeros (common for Wii Remote Plus internal MP)."""
         return bool(extension_id) and all(value == 0x00 for value in extension_id)
 
     @staticmethod
     def decode_motion_plus_report(data: bytes) -> dict[str, int | bool]:
+        """
+        Decodes a 6-byte MotionPlus report.
+
+        Args:
+            data: The raw 6-byte extension data.
+
+        Returns:
+            A dictionary containing raw gyro values and sensitivity flags.
+        """
         if len(data) < MOTION_PLUS_ACTIVE_REPORT_LENGTH:
             raise ValueError("MotionPlus report must contain at least 6 bytes")
 
@@ -392,6 +494,7 @@ class Wiimote(Lowlevel_Wiimote):
 
     @staticmethod
     def is_plausible_motion_plus_report(data: bytes) -> bool:
+        """Checks if the MotionPlus report contains plausible data (not all zeros or maxed out)."""
         if len(data) < MOTION_PLUS_ACTIVE_REPORT_LENGTH:
             return False
         if not (data[5] & 0x02):
@@ -408,6 +511,7 @@ class Wiimote(Lowlevel_Wiimote):
         return True
 
     def _wait_for_status(self, timeout_s: float = 1.0) -> bool:
+        """Waits for a status report."""
         start_time = time.time()
         while time.time() - start_time < timeout_s:
             rid = self.read(50)
@@ -419,6 +523,7 @@ class Wiimote(Lowlevel_Wiimote):
     def _read_memory_block(
         self, address: int, size: int, timeout_s: float = 1.0
     ) -> bytes:
+        """Reads a block of memory synchronously."""
         self.read_memory(address, size)
         low_addr = address & 0xFFFF
         start_time = time.time()
@@ -434,13 +539,16 @@ class Wiimote(Lowlevel_Wiimote):
         return b""
 
     def _initialize_extension_port(self) -> None:
+        """Initializes the extension port for non-encrypted communication."""
         self.write_register(EXTENSION_INIT_ENABLE_ADDRESS, 0x55)
         self.write_register(EXTENSION_INIT_DISABLE_ENCRYPTION_ADDRESS, 0x00)
 
     def _initialize_motion_plus(self) -> None:
+        """Initializes the MotionPlus extension."""
         self.write_register(MOTION_PLUS_INIT_ADDRESS, 0x55)
 
     def _probe_motion_plus_stream(self, timeout_s: float = 1.0) -> bool:
+        """Probes for a valid MotionPlus data stream."""
         self.set_reporting_mode(opcode.DATA_35.value, continuous=True)
         start_time = time.time()
         while time.time() - start_time < timeout_s:
@@ -453,6 +561,12 @@ class Wiimote(Lowlevel_Wiimote):
         return False
 
     def activate_motion_plus(self) -> bytes:
+        """
+        Activates the MotionPlus extension.
+
+        Returns:
+            The extension ID after activation attempt.
+        """
         self.write_register(MOTION_PLUS_ACTIVATE_ADDRESS, 0x04)
         time.sleep(0.1)  # Wait for activation to process
         active_id = self._read_memory_block(EXTENSION_ID_ADDRESS, 6)
@@ -466,6 +580,12 @@ class Wiimote(Lowlevel_Wiimote):
         return active_id
 
     def detect_motion_plus(self) -> bytes:
+        """
+        Detects if a MotionPlus extension is connected.
+
+        Returns:
+            The extension ID.
+        """
         self.request_status()
         self._wait_for_status()
         self._initialize_extension_port()
@@ -491,6 +611,12 @@ class Wiimote(Lowlevel_Wiimote):
         return self.motion_plus_id
 
     def require_motion_plus(self) -> bytes:
+        """
+        Ensures MotionPlus is connected and activated. Raises ConnectionError if not found.
+
+        Returns:
+            The extension ID.
+        """
         extension_id = self.detect_motion_plus()
 
         # MotionPlus ID か、Wii Remote Plus (Inside) で 0 が返ってきた場合にアクティベーションを試行
@@ -527,6 +653,7 @@ class Wiimote(Lowlevel_Wiimote):
         return extension_id
 
     def _load_calibration(self) -> None:
+        """Loads accelerometer calibration data from Wiimote EEPROM."""
         # Read calibration from EEPROM (0x0016)
         # 0x16: X0, 0x17: Y0, 0x18: Z0
         # 0x19: LSBs for 0G (--XXYYZZ)
@@ -555,6 +682,12 @@ class Wiimote(Lowlevel_Wiimote):
             time.sleep(0.01)
 
     def rumble_ms(self, duration_ms: int) -> None:
+        """
+        Enables rumble for a specific duration.
+
+        Args:
+            duration_ms: Duration in milliseconds.
+        """
         if duration_ms <= 0:
             self.rumble(False)
             self.rumble_end_time = None
@@ -563,6 +696,16 @@ class Wiimote(Lowlevel_Wiimote):
             self.rumble_end_time = time.time() + (duration_ms / 1000.0)
 
     def update(self, timeout: int = 0) -> Optional[int]:
+        """
+        Updates the Wiimote state by reading the next report.
+        Also handles rumble timing.
+
+        Args:
+            timeout: Timeout in milliseconds.
+
+        Returns:
+            The report ID opcode.
+        """
         rid = self.read(timeout)
         if self.motion_plus_activated and self._extension_fresh:
             if len(self.extension) >= MOTION_PLUS_ACTIVE_REPORT_LENGTH:
@@ -587,6 +730,7 @@ class Wiimote(Lowlevel_Wiimote):
 
     @property
     def gforce(self) -> tuple[float, float, float]:
+        """Returns the current accelerometer readings in Gs, using calibration data."""
         x, y, z = self.accel
 
         def to_g(val: int, zero: int, one_g: int) -> float:
@@ -602,6 +746,15 @@ class Wiimote(Lowlevel_Wiimote):
         )
 
     def is_pressed(self, mask: buttons | int) -> bool:
+        """
+        Checks if a specific button is currently pressed.
+
+        Args:
+            mask: The button bitmask to check.
+
+        Returns:
+            True if pressed, False otherwise.
+        """
         if isinstance(mask, int):
             return bool(self.buttons & mask)
         return bool(self.buttons & mask.value)

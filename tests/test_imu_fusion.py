@@ -39,10 +39,10 @@ class TestImuFusion:
         """Tests that orientation initializes correctly from the first accelerometer reading."""
         imu = ImuFusion()
         imu.update(0, 0, 1)
-        assert imu.pitch == pytest.approx(0.0)
-        assert imu.roll == pytest.approx(0.0)
+        assert float(imu.pitch) == pytest.approx(0.0)
+        assert float(imu.roll) == pytest.approx(0.0)
 
-        assert imu.yaw == pytest.approx(0.0)
+        assert float(imu.yaw) == pytest.approx(0.0)
 
     def test_initialization_tilted(self) -> None:
         """Tests that orientation initializes correctly from a tilted accelerometer reading."""
@@ -51,8 +51,8 @@ class TestImuFusion:
         angle = math.radians(45)
         imu.update(0, math.sin(angle), math.cos(angle))
 
-        assert imu.pitch == pytest.approx(-angle)
-        assert imu.roll == pytest.approx(0.0)
+        assert float(imu.pitch) == pytest.approx(-angle)
+        assert float(imu.roll) == pytest.approx(0.0)
 
     def test_gyro_integration_pitch(self) -> None:
         """Tests integration of pitch gyroscope data."""
@@ -67,7 +67,7 @@ class TestImuFusion:
         dt = 0.1
         imu.update(0, 0, 1, gyro=gyro, dt=dt)
 
-        assert imu.pitch == pytest.approx(-0.0745273, abs=1e-6)
+        assert float(imu.pitch) == pytest.approx(-0.0745273, abs=1e-6)
 
     def test_gyro_integration_roll(self) -> None:
         """Tests integration of roll gyroscope data."""
@@ -80,7 +80,7 @@ class TestImuFusion:
         dt = 0.05
         imu.update(0, 0, 1, gyro=gyro, dt=dt)
 
-        assert imu.roll == pytest.approx(0.0248412, abs=1e-6)
+        assert float(imu.roll) == pytest.approx(0.0248412, abs=1e-6)
 
     def test_gyro_integration_yaw(self) -> None:
         """Tests integration of yaw gyroscope data."""
@@ -94,7 +94,7 @@ class TestImuFusion:
         dt = 0.1
         imu.update(0, 0, 1, gyro=gyro, dt=dt)
 
-        assert imu.yaw == pytest.approx(math.radians(actual_rate * dt))
+        assert float(imu.yaw) == pytest.approx(math.radians(actual_rate * dt))
 
     def test_reset_yaw(self) -> None:
         """Tests resetting the yaw component of the orientation."""
@@ -105,7 +105,7 @@ class TestImuFusion:
         assert abs(imu.yaw) > 0.01
 
         imu.reset_yaw()
-        assert imu.yaw == pytest.approx(0.0)
+        assert float(imu.yaw) == pytest.approx(0.0)
 
     def test_accel_correction(self) -> None:
         """Test that accelerometer correction slowly pulls orientation back towards gravity."""
@@ -113,7 +113,7 @@ class TestImuFusion:
         # Start flat
         imu.update(0, 0, 1)
 
-        imu.orient = R.from_euler("y", math.radians(10))
+        imu.orient = R.from_euler("y", math.radians(10))  # type: ignore
 
         initial_pitch = imu.pitch
         for _ in range(10):
@@ -132,7 +132,7 @@ class TestImuFusion:
         gyro = {"roll": 8192, "pitch": val, "yaw": 8192}
 
         imu.update(0, 0, 1, gyro=gyro, dt=1.0)
-        assert imu.pitch == pytest.approx(0.0)
+        assert float(imu.pitch) == pytest.approx(0.0)
 
     def test_gyro_bias_calibration(self) -> None:
         """Tests the gyroscope bias calibration logic."""

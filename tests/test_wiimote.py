@@ -25,7 +25,7 @@ from weeee.core import (
 from weeee.simulator import SimulatedHIDDevice
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore
 def sim_wiimote() -> Generator[tuple[SimulatedHIDDevice, Wiimote], None, None]:
     sim_device = SimulatedHIDDevice()
     sim_device.open()
@@ -213,8 +213,9 @@ class TestWiimoteLogic:
         self, sim_wiimote: tuple[SimulatedHIDDevice, Wiimote]
     ) -> None:
         sim_device, wiimote = sim_wiimote
-        sim_device.battery = 150
-        sim_device.extension_connected = True
+        sim_device.set_battery(150)
+
+        sim_device.set_extension_connected(True)
         wiimote.request_status()
         wiimote.update()
         assert wiimote.battery == 150
@@ -289,7 +290,7 @@ class TestIR:
     ) -> None:
         sim_device, wiimote = sim_wiimote
         wiimote.set_reporting_mode(opcode.DATA_33.value)
-        sim_device.ir = [(100, 200), (300, 400), (500, 600), (700, 800)]
+        sim_device.set_ir([(100, 200), (300, 400), (500, 600), (700, 800)])
         wiimote.update()
         assert wiimote.ir == [(100, 200), (300, 400), (500, 600), (700, 800)]
 
@@ -298,7 +299,7 @@ class TestIR:
     ) -> None:
         sim_device, wiimote = sim_wiimote
         wiimote.set_reporting_mode(opcode.DATA_36.value)
-        sim_device.ir = [(100, 200), (300, 400), (500, 600), (700, 800)]
+        sim_device.set_ir([(100, 200), (300, 400), (500, 600), (700, 800)])
         wiimote.update()
         # Basic mode only reports first 2 dots
         assert wiimote.ir[0] == (100, 200)

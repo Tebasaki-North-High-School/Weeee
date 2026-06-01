@@ -38,17 +38,17 @@ class SimulatedHIDDevice(hid.device):
 
     def __init__(self) -> None:
         """Initializes the simulated Wiimote with default state and calibration data."""
-        self.is_open = False
-        self.path: Optional[bytes] = None
-        self.serial_number: Optional[str] = None
+        self._is_open: bool = False
+        self._path: Optional[bytes] = None
+        self._serial_number: Optional[str] = None
 
         # Wiimote State
-        self.rumble = False
-        self.leds = 0
-        self.reporting_mode = 0x30
-        self.continuous_reporting = False
-        self.battery = 200  # ~80%
-        self.extension_connected = False
+        self._rumble = False
+        self._leds = 0
+        self._reporting_mode = 0x30
+        self._continuous_reporting = False
+        self._battery = 200  # ~80%
+        self._extension_connected = False
 
         # Memory
         self.memory = bytearray(0x1000000)  # 16MB address space
@@ -63,10 +63,10 @@ class SimulatedHIDDevice(hid.device):
         self.memory[0x1D] = 0x00
 
         # Input data
-        self.buttons = 0
-        self.accel = (512, 512, 512)
-        self.ir = [(1023, 1023)] * 4
-        self.gyro: _gyro = {
+        self._buttons = 0
+        self._accel = (512, 512, 512)
+        self._ir = [(1023, 1023)] * 4
+        self._gyro: _gyro = {
             "yaw": 0x2000,
             "roll": 0x2000,
             "pitch": 0x2000,
@@ -80,6 +80,34 @@ class SimulatedHIDDevice(hid.device):
 
         # Whether a MotionPlus hardware is attached (distinct from activated state)
         self._motion_plus_hardware_present = False
+
+    @property
+    def is_open(self) -> bool:
+        return self._is_open
+
+    @property
+    def path(self) -> Optional[bytes]:
+        return self._path
+
+    @property
+    def serial_number(self) -> Optional[str]:
+        return self._serial_number
+
+    @property
+    def rumble(self) -> bool:
+        return self._rumble
+
+    @property
+    def leds(self) -> int:
+        return self._leds
+
+    @property
+    def reporting_mode(self) -> int:
+        return self._reporting_mode
+
+    @property
+    def extension_connected(self) -> bool:
+        return self._extension_connected
 
     def set_motion_plus(self, connected: bool = True) -> None:
         """
@@ -122,10 +150,10 @@ class SimulatedHIDDevice(hid.device):
                 0x04,
                 0x05,
             ]
-            self.extension_connected = True
+            self._extension_connected = True
         else:
             self.memory[EXTENSION_ID_ADDRESS : EXTENSION_ID_ADDRESS + 6] = [0x00] * 6
-            self.extension_connected = False
+            self._extension_connected = False
 
     def open(
         self,
@@ -141,8 +169,8 @@ class SimulatedHIDDevice(hid.device):
             product_id: USB Product ID.
             serial_number: Optional serial number.
         """
-        self.is_open = True
-        self.serial_number = serial_number
+        self._is_open = True
+        self._serial_number = serial_number
 
     def open_path(self, device_path: bytes) -> None:
         """
@@ -151,12 +179,12 @@ class SimulatedHIDDevice(hid.device):
         Args:
             device_path: The device path.
         """
-        self.is_open = True
-        self.path = device_path
+        self._is_open = True
+        self._path = device_path
 
     def close(self) -> None:
         """Simulates closing the HID device."""
-        self.is_open = False
+        self._is_open = False
 
     def write(self, data: bytes | List[int]) -> int:
         """
@@ -176,19 +204,19 @@ class SimulatedHIDDevice(hid.device):
         payload = data[1:]
 
         if report_id == opcode.RUMBLE.value:
-            self.rumble = bool(payload[0] & 0x01)
+            self._rumble = bool(payload[0] & 0x01)
         elif report_id == opcode.PLAYER_LEDS.value:
-            self.leds = (payload[0] >> 4) & 0x0F
-            self.rumble = bool(payload[0] & 0x01)
+            self._leds = (payload[0] >> 4) & 0x0F
+            self._rumble = bool(payload[0] & 0x01)
         elif report_id == opcode.DATA_REPORTING_MODE.value:
-            self.continuous_reporting = bool(payload[0] & 0x04)
-            self.reporting_mode = payload[1]
-            self.rumble = bool(payload[0] & 0x01)
+            self._continuous_reporting = bool(payload[0] & 0x04)
+            self._reporting_mode = payload[1]
+            self._rumble = bool(payload[0] & 0x01)
         elif report_id == opcode.STATUS_INFORMATION_REQUEST.value:
-            self.rumble = bool(payload[0] & 0x01)
+            self._rumble = bool(payload[0] & 0x01)
             self._enqueue_status_report()
         elif report_id == opcode.WRITE_MEMORY_AND_REGISTERS.value:
-            self.rumble = bool(payload[0] & 0x01)
+            self._rumble = bool(payload[0] & 0x01)
             addr = (payload[1] << 16) | (payload[2] << 8) | payload[3]
             size = payload[4]
             data_to_write = payload[5 : 5 + size]
@@ -229,7 +257,7 @@ class SimulatedHIDDevice(hid.device):
                 self.set_motion_plus_active(False)
 
         elif report_id == opcode.READ_MEMORY_AND_REGISTERS.value:
-            self.rumble = bool(payload[0] & 0x01)
+            self._rumble = bool(payload[0] & 0x01)
             addr = (payload[1] << 16) | (payload[2] << 8) | payload[3]
             size = (payload[4] << 8) | payload[5]
             self._enqueue_read_report(addr, size)
@@ -272,21 +300,21 @@ class SimulatedHIDDevice(hid.device):
         """Enqueues a status report (0x20) into the response queue."""
         report = [0] * 7
         report[0] = opcode.STATUS_INFORMATION.value
-        report[1] = (self.buttons >> 8) & 0xFF
-        report[2] = self.buttons & 0xFF
+        report[1] = (self._buttons >> 8) & 0xFF
+        report[2] = self._buttons & 0xFF
         # LF byte: L (LEDs) in high nibble, F (Flags) in low nibble
         # bit 1: Extension connected, bit 0: Battery nearly empty
-        report[3] = (self.leds << 4) | (0x02 if self.extension_connected else 0x00)
-        # Note: self.battery is 0-255. VV is the current battery level.
-        report[6] = self.battery
+        report[3] = (self._leds << 4) | (0x02 if self._extension_connected else 0x00)
+        # Note: self._battery is 0-255. VV is the current battery level.
+        report[6] = self._battery
         self.response_queue.append(report)
 
     def _enqueue_ack(self, report_id: int, error_code: int) -> None:
         """Enqueues an acknowledgment report (0x22) into the response queue."""
         report = [0] * 6
         report[0] = opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
-        report[1] = (self.buttons >> 8) & 0xFF
-        report[2] = self.buttons & 0xFF
+        report[1] = (self._buttons >> 8) & 0xFF
+        report[2] = self._buttons & 0xFF
         report[3] = report_id
         report[4] = error_code
         self.response_queue.append(report)
@@ -299,8 +327,8 @@ class SimulatedHIDDevice(hid.device):
             chunk_size = min(remaining, 16)
             report = [0] * 22
             report[0] = opcode.READ_MEMORY_AND_REGISTERS_DATA.value
-            report[1] = (self.buttons >> 8) & 0xFF
-            report[2] = self.buttons & 0xFF
+            report[1] = (self._buttons >> 8) & 0xFF
+            report[2] = self._buttons & 0xFF
             report[3] = (chunk_size - 1) << 4
             report[4] = (current_addr >> 8) & 0xFF
             report[5] = current_addr & 0xFF
@@ -315,107 +343,111 @@ class SimulatedHIDDevice(hid.device):
 
     def _generate_data_report(self) -> List[int]:
         """Generates a live data report based on the current reporting mode."""
-        report_1 = (self.buttons >> 8) & 0xFF
-        report_2 = self.buttons & 0xFF
+        report_1 = (self._buttons >> 8) & 0xFF
+        report_2 = self._buttons & 0xFF
 
         # Add Accelerometer LSBs if applicable (except for interleaved mode)
-        if self.reporting_mode in (0x31, 0x33, 0x35, 0x37):
+        if self._reporting_mode in (0x31, 0x33, 0x35, 0x37):
             # X<1:0> to bits 6-5 of report[1]
-            report_1 |= (self.accel[0] & 0x03) << 5
+            report_1 |= (self._accel[0] & 0x03) << 5
             # Z<1> to bit 6 of report[2], Y<1> to bit 5 of report[2]
-            report_2 |= (self.accel[2] & 0x02) << 5
-            report_2 |= (self.accel[1] & 0x02) << 4
+            report_2 |= (self._accel[2] & 0x02) << 5
+            report_2 |= (self._accel[1] & 0x02) << 4
 
-        if self.reporting_mode == 0x30:  # Buttons only
+        if self._reporting_mode == 0x30:  # Buttons only
             report = [0] * 3
             report[0] = 0x30
             report[1] = report_1
             report[2] = report_2
             return report
-        elif self.reporting_mode == 0x31:  # Buttons + Accel
+        elif self._reporting_mode == 0x31:  # Buttons + Accel
             report = [0] * 6
             report[0] = 0x31
             report[1] = report_1
             report[2] = report_2
-            report[3] = (self.accel[0] >> 2) & 0xFF
-            report[4] = (self.accel[1] >> 2) & 0xFF
-            report[5] = (self.accel[2] >> 2) & 0xFF
+            report[3] = (self._accel[0] >> 2) & 0xFF
+            report[4] = (self._accel[1] >> 2) & 0xFF
+            report[5] = (self._accel[2] >> 2) & 0xFF
             return report
-        elif self.reporting_mode == 0x32:  # Buttons + Extension (8 bytes basic)
+        elif self._reporting_mode == 0x32:  # Buttons + Extension (8 bytes basic)
             report = [0] * 11
             report[0] = 0x32
-            report[1] = (self.buttons >> 8) & 0xFF
-            report[2] = self.buttons & 0xFF
-            if self.extension_connected:
+            report[1] = (self._buttons >> 8) & 0xFF
+            report[2] = self._buttons & 0xFF
+            if self._extension_connected:
                 yaw, roll, pitch = (
-                    self.gyro["yaw"],
-                    self.gyro["roll"],
-                    self.gyro["pitch"],
+                    self._gyro["yaw"],
+                    self._gyro["roll"],
+                    self._gyro["pitch"],
                 )
                 report[3] = yaw & 0xFF
                 report[4] = roll & 0xFF
                 report[5] = pitch & 0xFF
                 report[6] = (
                     ((yaw >> 8) << 2)
-                    | (0x02 if self.gyro["yaw_slow"] else 0)
-                    | (0x01 if self.gyro["pitch_slow"] else 0)
+                    | (0x02 if self._gyro["yaw_slow"] else 0)
+                    | (0x01 if self._gyro["pitch_slow"] else 0)
                 )
-                report[7] = ((roll >> 8) << 2) | (0x02 if self.gyro["roll_slow"] else 0)
+                report[7] = ((roll >> 8) << 2) | (
+                    0x02 if self._gyro["roll_slow"] else 0
+                )
                 report[8] = ((pitch >> 8) << 2) | 0x02
             return report
-        elif self.reporting_mode == 0x33:  # Buttons + Accel + IR Extended
+        elif self._reporting_mode == 0x33:  # Buttons + Accel + IR Extended
             report = [0] * 18
             report[0] = 0x33
             report[1] = report_1
             report[2] = report_2
-            report[3] = (self.accel[0] >> 2) & 0xFF
-            report[4] = (self.accel[1] >> 2) & 0xFF
-            report[5] = (self.accel[2] >> 2) & 0xFF
+            report[3] = (self._accel[0] >> 2) & 0xFF
+            report[4] = (self._accel[1] >> 2) & 0xFF
+            report[5] = (self._accel[2] >> 2) & 0xFF
             # IR data (12 bytes)
             for i in range(4):
-                x, y = self.ir[i]
+                x, y = self._ir[i]
                 base = 6 + i * 3
                 report[base] = x & 0xFF
                 report[base + 1] = y & 0xFF
                 report[base + 2] = ((x >> 8) << 4) | ((y >> 8) << 6)
             return report
-        elif self.reporting_mode == 0x34:  # Buttons + Extension (16 bytes full)
+        elif self._reporting_mode == 0x34:  # Buttons + Extension (16 bytes full)
             report = [0] * 22
             report[0] = 0x34
-            report[1] = (self.buttons >> 8) & 0xFF
-            report[2] = self.buttons & 0xFF
-            if self.extension_connected:
+            report[1] = (self._buttons >> 8) & 0xFF
+            report[2] = self._buttons & 0xFF
+            if self._extension_connected:
                 yaw, roll, pitch = (
-                    self.gyro["yaw"],
-                    self.gyro["roll"],
-                    self.gyro["pitch"],
+                    self._gyro["yaw"],
+                    self._gyro["roll"],
+                    self._gyro["pitch"],
                 )
                 report[3] = yaw & 0xFF
                 report[4] = roll & 0xFF
                 report[5] = pitch & 0xFF
                 report[6] = (
                     ((yaw >> 8) << 2)
-                    | (0x02 if self.gyro["yaw_slow"] else 0)
-                    | (0x01 if self.gyro["pitch_slow"] else 0)
+                    | (0x02 if self._gyro["yaw_slow"] else 0)
+                    | (0x01 if self._gyro["pitch_slow"] else 0)
                 )
-                report[7] = ((roll >> 8) << 2) | (0x02 if self.gyro["roll_slow"] else 0)
+                report[7] = ((roll >> 8) << 2) | (
+                    0x02 if self._gyro["roll_slow"] else 0
+                )
                 report[8] = ((pitch >> 8) << 2) | 0x02
             return report
-        elif self.reporting_mode == 0x35:  # Buttons + Accel + Extension
+        elif self._reporting_mode == 0x35:  # Buttons + Accel + Extension
             report = [0] * 22
             report[0] = 0x35
             report[1] = report_1
             report[2] = report_2
-            report[3] = (self.accel[0] >> 2) & 0xFF
-            report[4] = (self.accel[1] >> 2) & 0xFF
-            report[5] = (self.accel[2] >> 2) & 0xFF
+            report[3] = (self._accel[0] >> 2) & 0xFF
+            report[4] = (self._accel[1] >> 2) & 0xFF
+            report[5] = (self._accel[2] >> 2) & 0xFF
             # Extension data (16 bytes)
-            if self.extension_connected:
+            if self._extension_connected:
                 # MotionPlus uses 6 bytes
                 yaw, roll, pitch = (
-                    self.gyro["yaw"],
-                    self.gyro["roll"],
-                    self.gyro["pitch"],
+                    self._gyro["yaw"],
+                    self._gyro["roll"],
+                    self._gyro["pitch"],
                 )
                 # Byte 0: Yaw 7:0
                 report[6] = yaw & 0xFF
@@ -425,26 +457,26 @@ class SimulatedHIDDevice(hid.device):
                 report[8] = pitch & 0xFF
                 # Byte 3: Yaw 13:8 (bits 7-2), Yaw slow (bit 1), Pitch slow (bit 0)
                 report[9] = (yaw >> 8) << 2
-                if self.gyro["yaw_slow"]:
+                if self._gyro["yaw_slow"]:
                     report[9] |= 0x02
-                if self.gyro["pitch_slow"]:
+                if self._gyro["pitch_slow"]:
                     report[9] |= 0x01
                 # Byte 4: Roll 13:8 (bits 7-2), Roll slow (bit 1), Ext connected (bit 0)
                 report[10] = (roll >> 8) << 2
-                if self.gyro["roll_slow"]:
+                if self._gyro["roll_slow"]:
                     report[10] |= 0x02
                 # Byte 5: Pitch 13:8 (bits 7-2), 1 (bit 1), 0 (bit 0)
                 report[11] = ((pitch >> 8) << 2) | 0x02
             return report
-        elif self.reporting_mode == 0x36:  # Buttons + IR (basic, 10) + Extension (9)
+        elif self._reporting_mode == 0x36:  # Buttons + IR (basic, 10) + Extension (9)
             report = [0] * 22
             report[0] = 0x36
-            report[1] = (self.buttons >> 8) & 0xFF
-            report[2] = self.buttons & 0xFF
+            report[1] = (self._buttons >> 8) & 0xFF
+            report[2] = self._buttons & 0xFF
             # IR basic: 5 bytes per 2 dots, 10 bytes total
             for i in range(2):
-                x1, y1 = self.ir[i * 2]
-                x2, y2 = self.ir[i * 2 + 1]
+                x1, y1 = self._ir[i * 2]
+                x2, y2 = self._ir[i * 2 + 1]
                 base = 3 + i * 5
                 report[base] = x1 & 0xFF
                 report[base + 1] = y1 & 0xFF
@@ -457,11 +489,11 @@ class SimulatedHIDDevice(hid.device):
                 report[base + 3] = x2 & 0xFF
                 report[base + 4] = y2 & 0xFF
             # Extension (9 bytes)
-            if self.extension_connected:
+            if self._extension_connected:
                 yaw, roll, pitch = (
-                    self.gyro["yaw"],
-                    self.gyro["roll"],
-                    self.gyro["pitch"],
+                    self._gyro["yaw"],
+                    self._gyro["roll"],
+                    self._gyro["pitch"],
                 )
                 report[13] = yaw & 0xFF
                 report[14] = roll & 0xFF
@@ -469,28 +501,28 @@ class SimulatedHIDDevice(hid.device):
                 # MP extension uses 6 bytes in the 9-byte slot
                 report[16] = (
                     ((yaw >> 8) << 2)
-                    | (0x02 if self.gyro["yaw_slow"] else 0)
-                    | (0x01 if self.gyro["pitch_slow"] else 0)
+                    | (0x02 if self._gyro["yaw_slow"] else 0)
+                    | (0x01 if self._gyro["pitch_slow"] else 0)
                 )
                 report[17] = ((roll >> 8) << 2) | (
-                    0x02 if self.gyro["roll_slow"] else 0
+                    0x02 if self._gyro["roll_slow"] else 0
                 )
                 report[18] = ((pitch >> 8) << 2) | 0x02
             return report
         elif (
-            self.reporting_mode == 0x37
+            self._reporting_mode == 0x37
         ):  # Buttons + Accel + IR (basic, 10) + Extension (6)
             report = [0] * 22
             report[0] = 0x37
             report[1] = report_1
             report[2] = report_2
-            report[3] = (self.accel[0] >> 2) & 0xFF
-            report[4] = (self.accel[1] >> 2) & 0xFF
-            report[5] = (self.accel[2] >> 2) & 0xFF
+            report[3] = (self._accel[0] >> 2) & 0xFF
+            report[4] = (self._accel[1] >> 2) & 0xFF
+            report[5] = (self._accel[2] >> 2) & 0xFF
             # IR basic: 5 bytes per 2 dots, 10 bytes total
             for i in range(2):
-                x1, y1 = self.ir[i * 2]
-                x2, y2 = self.ir[i * 2 + 1]
+                x1, y1 = self._ir[i * 2]
+                x2, y2 = self._ir[i * 2 + 1]
                 base = 6 + i * 5
                 report[base] = x1 & 0xFF
                 report[base + 1] = y1 & 0xFF
@@ -503,22 +535,22 @@ class SimulatedHIDDevice(hid.device):
                 report[base + 3] = x2 & 0xFF
                 report[base + 4] = y2 & 0xFF
             # Extension (6 bytes)
-            if self.extension_connected:
+            if self._extension_connected:
                 yaw, roll, pitch = (
-                    self.gyro["yaw"],
-                    self.gyro["roll"],
-                    self.gyro["pitch"],
+                    self._gyro["yaw"],
+                    self._gyro["roll"],
+                    self._gyro["pitch"],
                 )
                 report[16] = yaw & 0xFF
                 report[17] = roll & 0xFF
                 report[18] = pitch & 0xFF
                 report[19] = (
                     ((yaw >> 8) << 2)
-                    | (0x02 if self.gyro["yaw_slow"] else 0)
-                    | (0x01 if self.gyro["pitch_slow"] else 0)
+                    | (0x02 if self._gyro["yaw_slow"] else 0)
+                    | (0x01 if self._gyro["pitch_slow"] else 0)
                 )
                 report[20] = ((roll >> 8) << 2) | (
-                    0x02 if self.gyro["roll_slow"] else 0
+                    0x02 if self._gyro["roll_slow"] else 0
                 )
                 report[21] = ((pitch >> 8) << 2) | 0x02
             return report
@@ -537,7 +569,34 @@ class SimulatedHIDDevice(hid.device):
         Args:
             button_mask: A bitmask of buttons.
         """
-        self.buttons = button_mask
+        self._buttons = button_mask
+
+    def set_reporting_mode(self, value: int) -> None:
+        """
+        Sets the reporting mode.
+
+        Args:
+            value: Reporting mode value
+        """
+        self._reporting_mode = value
+
+    def set_battery(self, value: int) -> None:
+        """
+        Sets the battery value.
+
+        Args:
+            value: Set battery value (0-255)
+        """
+        self._battery = value
+
+    def set_leds(self, value: int) -> None:
+        """
+        Sets the leds value.
+
+        Args:
+            value: A bitmask of leds
+        """
+        self._leds = value
 
     def set_accel(self, x: int, y: int, z: int) -> None:
         """
@@ -546,7 +605,34 @@ class SimulatedHIDDevice(hid.device):
         Args:
             x, y, z: Accelerometer values (0-1023).
         """
-        self.accel = (x, y, z)
+        self._accel = (x, y, z)
+
+    def set_ir(self, value: list[tuple[int, int]]) -> None:
+        """
+        Sets the IR values.
+
+        Args:
+            value: IR values.
+        """
+        self._ir = value
+
+    def set_continuous_reporting(self, value: bool) -> None:
+        """
+        Sets the continuous_reporting values.
+
+        Args:
+            value: continuous_reporting values (bool).
+        """
+        self._continuous_reporting = value
+
+    def set_extension_connected(self, value: bool) -> None:
+        """
+        Sets the extension_connected values.
+
+        Args:
+            value: extension_connected values (bool).
+        """
+        self._extension_connected = value
 
     def set_gyro(
         self,
@@ -564,7 +650,7 @@ class SimulatedHIDDevice(hid.device):
             yaw, roll, pitch: Gyroscope values (0-16383).
             yaw_slow, roll_slow, pitch_slow: True for "slow" (high sensitivity) mode.
         """
-        self.gyro = {
+        self._gyro = {
             "yaw": yaw,
             "roll": roll,
             "pitch": pitch,

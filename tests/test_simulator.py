@@ -9,7 +9,7 @@ from weeee.simulator import SimulatedHIDDevice
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore
 def sim_wiimote() -> Generator[tuple[SimulatedHIDDevice, Wiimote], None, None]:
     sim_device = SimulatedHIDDevice()
     sim_device.open()
@@ -103,7 +103,7 @@ def test_mode_35_extension_non_zero_when_connected() -> None:
     sim_device.open()
     sim_device.set_motion_plus(True)
     sim_device.set_motion_plus_active(True)
-    sim_device.reporting_mode = 0x35
+    sim_device.set_reporting_mode(0x35)
     sim_device.set_gyro(
         0x1234, 0x2D78, 0x1ABC, yaw_slow=False, roll_slow=True, pitch_slow=False
     )
@@ -190,7 +190,7 @@ def test_motion_plus_init_populates_id() -> None:
 def test_report_mode_30_format() -> None:
     sim_device = SimulatedHIDDevice()
     sim_device.open()
-    sim_device.reporting_mode = 0x30
+    sim_device.set_reporting_mode(0x30)
     sim_device.set_buttons(buttons.BUTTON_A.value | buttons.BUTTON_LEFT.value)
 
     report = sim_device._generate_data_report()
@@ -204,7 +204,7 @@ def test_report_mode_30_format() -> None:
 def test_report_mode_31_format_roundtrip() -> None:
     sim_device = SimulatedHIDDevice()
     sim_device.open()
-    sim_device.reporting_mode = 0x31
+    sim_device.set_reporting_mode(0x31)
     sim_device.set_accel(515, 514, 514)  # 10-bit values
     sim_device.set_buttons(0x6060)  # known LSB bits
 
@@ -223,9 +223,9 @@ def test_report_mode_33_ir_roundtrip() -> None:
     """Set IR dots → generate 0x33 report → parse with _parse_ir_extended."""
     sim_device = SimulatedHIDDevice()
     sim_device.open()
-    sim_device.reporting_mode = 0x33
+    sim_device.set_reporting_mode(0x33)
     # IR dots at known positions (x, y) – each 10-bit value < 1024
-    sim_device.ir = [(100, 200), (300, 400), (500, 600), (700, 800)]
+    sim_device.set_ir([(100, 200), (300, 400), (500, 600), (700, 800)])
 
     report = sim_device._generate_data_report()
     assert report[0] == 0x33
@@ -240,8 +240,8 @@ def test_report_mode_33_ir_out_of_range() -> None:
     """IR dots at (1023,1023) should be treated as 'not seen'."""
     sim_device = SimulatedHIDDevice()
     sim_device.open()
-    sim_device.reporting_mode = 0x33
-    sim_device.ir = [(1023, 1023), (500, 600), (1023, 1023), (1023, 1023)]
+    sim_device.set_reporting_mode(0x33)
+    sim_device.set_ir([(1023, 1023), (500, 600), (1023, 1023), (1023, 1023)])
 
     report = sim_device._generate_data_report()
     wm = Lowlevel_Wiimote(device=sim_device)
@@ -269,9 +269,9 @@ def test_read_with_timeout_still_returns_data(
     still returns a data report (the real Wiimote always sends the first
     report after a mode change, even in non-continuous mode)."""
     sim_device, wiimote = sim_wiimote
-    sim_device.continuous_reporting = False
+    sim_device.set_continuous_reporting(False)
     sim_device.response_queue.clear()
-    sim_device.reporting_mode = 0x30
+    sim_device.set_reporting_mode(0x30)
     sim_device.set_buttons(buttons.BUTTON_A.value)
     result = sim_device.read(64, timeout_ms=50)
     assert result != []
@@ -286,7 +286,7 @@ def test_read_non_blocking_returns_data_immediately(
     the queue is empty."""
     sim_device, wiimote = sim_wiimote
     sim_device.response_queue.clear()
-    sim_device.reporting_mode = 0x30
+    sim_device.set_reporting_mode(0x30)
     sim_device.set_buttons(buttons.BUTTON_HOME.value)
     result = sim_device.read(64, timeout_ms=0)
     assert result[0] == 0x30
@@ -300,8 +300,8 @@ def test_continuous_reporting_ignores_timeout(
     a positive timeout."""
     sim_device = SimulatedHIDDevice()
     sim_device.open()
-    sim_device.reporting_mode = 0x31
-    sim_device.continuous_reporting = True
+    sim_device.set_reporting_mode(0x31)
+    sim_device.set_continuous_reporting(True)
     sim_device.response_queue.clear()
     result = sim_device.read(64, timeout_ms=100)
     assert result[0] == 0x31
@@ -339,7 +339,7 @@ def test_ack_drain_does_not_affect_queued_data_reports() -> None:
     assert r1[0] == opcode.STATUS_INFORMATION.value
 
     # Second read drains remaining ACK, no data report yet → generates one
-    sim_device.reporting_mode = 0x30
+    sim_device.set_reporting_mode(0x30)
     sim_device.set_buttons(0)
     r2 = sim_device.read(64)
     assert r2[0] == 0x30
@@ -419,7 +419,7 @@ def test_gyro_roundtrip_via_decode() -> None:
     sim_device.open()
     sim_device.set_motion_plus(True)
     sim_device.set_motion_plus_active(True)
-    sim_device.reporting_mode = 0x35
+    sim_device.set_reporting_mode(0x35)
 
     test_cases = [
         (0x0000, 0x1111, 0x2222, False, False, False),

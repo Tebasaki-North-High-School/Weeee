@@ -398,6 +398,8 @@ class Wiimote(Lowlevel_Wiimote):
     High-level Wiimote class with calibration, MotionPlus support, and convenience methods.
     """
 
+    motion_plus_activated: bool
+
     def __init__(
         self,
         target: Optional[str | bytes] = None,
@@ -560,7 +562,7 @@ class Wiimote(Lowlevel_Wiimote):
             time.sleep(0.005)
         return False
 
-    def activate_motion_plus(self) -> bytes:
+    def activate_motion_plus(self) -> bool:
         """
         Activates the MotionPlus extension.
 
@@ -573,11 +575,7 @@ class Wiimote(Lowlevel_Wiimote):
         # ID check
         self.motion_plus_activated = self.is_motion_plus_active_id(active_id)
 
-        # Stream check
-        if self._probe_motion_plus_stream(timeout_s=1.5):
-            self.motion_plus_activated = True
-
-        return active_id
+        return self.motion_plus_activated
 
     def detect_motion_plus(self) -> bytes:
         """
@@ -641,12 +639,12 @@ class Wiimote(Lowlevel_Wiimote):
             return extension_id
 
         # アクティベーション実行
-        active_id = self.activate_motion_plus()
+        success = self.activate_motion_plus()
 
-        if not self.motion_plus_activated:
+        if not success:
             self.close()
             raise ConnectionError(
-                f"Wii MotionPlus activation failed; data stream not detected. (ID: {active_id.hex()})"
+                "Wii MotionPlus activation failed; Activation was failed."
             )
 
         self.set_reporting_mode(opcode.DATA_35.value, continuous=True)

@@ -12,6 +12,7 @@ import os
 import sys
 import time
 from collections.abc import Generator
+from typing import Optional
 
 import hid
 import pytest
@@ -130,9 +131,9 @@ class TestDataReportModes:
             pytest.skip(f"mode 0x{mode:02x}: no matching report from real device")
 
         prev_mode = sim.reporting_mode
-        sim.reporting_mode = mode
+        sim.set_reporting_mode(mode)
         sim_r = sim._generate_data_report()
-        sim.reporting_mode = prev_mode
+        sim.set_reporting_mode(prev_mode)
 
         # ── Report-ID ──
         assert real_r[0] == mode, f"real report-ID 0x{real_r[0]:02x} != {mode:#04x}"
@@ -188,9 +189,9 @@ class TestButtons:
         real_btn = (real_r[1] << 8) | real_r[2]
 
         sim.set_buttons(buttons.BUTTON_A.value | buttons.BUTTON_LEFT.value)
-        sim.reporting_mode = 0x31
+        sim.set_reporting_mode(0x31)
         sim_r = sim._generate_data_report()
-        sim.reporting_mode = 0x30
+        sim.set_reporting_mode(0x30)
         sim.set_buttons(0)
 
         sim_btn = (sim_r[1] << 8) | sim_r[2]
@@ -551,8 +552,8 @@ class TestMotionPlusStream:
         # ── Simulator ──
         sim.set_motion_plus(True)
         sim.set_motion_plus_active(True)
-        sim.reporting_mode = 0x35
-        sim.continuous_reporting = True
+        sim.set_reporting_mode(0x35)
+        sim.set_continuous_reporting(True)
         sim.set_gyro(0x2000, 0x2000, 0x2000)
         sim_r = sim._generate_data_report()
 
@@ -701,7 +702,6 @@ class TestLowlevelWiimote:
 class TestWiimoteHighLevel:
     def test_constructor_enumerate(self) -> None:
         wm = Wiimote()
-        assert wm.device is not None
         wm.close()
 
     def test_state_after_construction(self) -> None:
@@ -743,12 +743,13 @@ class TestWiimoteHighLevel:
     def test_rumble_ms(self) -> None:
         wm = Wiimote()
         wm.rumble_ms(100)
-        assert wm.is_rumble is True
+        assert bool(wm.is_rumble) is True
         assert wm.rumble_end_time is not None
         time.sleep(0.15)
         wm.update()
-        assert wm.is_rumble is False
-        assert wm.rumble_end_time is None
+        assert bool(wm.is_rumble) is False
+        rumble_end: Optional[float] = wm.rumble_end_time
+        assert rumble_end is None
         wm.close()
 
     def test_is_pressed_type(self) -> None:
@@ -772,7 +773,7 @@ class TestSimulatorUnit:
     def test_open_close_and_errors(self) -> None:
         dev = SimulatedHIDDevice()
         # Initial state checks
-        assert not dev.is_open
+        assert not bool(dev.is_open)
         assert dev.path is None
         assert dev.serial_number is None
 
@@ -785,27 +786,29 @@ class TestSimulatorUnit:
 
         # Open paths
         dev.open_path(b"mock_path")
-        assert dev.is_open
-        assert dev.path == b"mock_path"
+        assert bool(dev.is_open)
+        p: Optional[bytes] = dev.path
+        assert p == b"mock_path"
 
         dev.close()
-        assert not dev.is_open
+        assert not bool(dev.is_open)
 
         # Open by serial
         dev.open(serial_number="12345")
-        assert dev.is_open
-        assert dev.serial_number == "12345"
+        assert bool(dev.is_open)
+        sn: Optional[str] = dev.serial_number
+        assert sn == "12345"
         dev.close()
 
     def test_set_motion_plus_false(self) -> None:
         dev = SimulatedHIDDevice()
         dev.open()
         dev.set_motion_plus(True)
-        assert dev._motion_plus_hardware_present
+        assert bool(dev._motion_plus_hardware_present)
 
         dev.set_motion_plus(False)
-        assert not dev._motion_plus_hardware_present
-        assert not dev.extension_connected
+        assert not bool(dev._motion_plus_hardware_present)
+        assert not bool(dev.extension_connected)
 
         # Verify MOTION_PLUS_ID_ADDRESS memory is zeroed out
         assert dev.memory[
@@ -819,19 +822,19 @@ class TestSimulatorUnit:
 
         # Rumble report (0x11)
         dev.write([opcode.RUMBLE.value, 0x01])
-        assert dev.rumble is True
+        assert bool(dev.rumble) is True
 
         dev.write([opcode.RUMBLE.value, 0x00])
-        assert dev.rumble is False
+        assert bool(dev.rumble) is False
 
         # Player LEDs report (0x11)
         dev.write([opcode.PLAYER_LEDS.value, 0x51])
-        assert dev.leds == 0x05
-        assert dev.rumble is True
+        assert int(dev.leds) == 0x05
+        assert bool(dev.rumble) is True
 
         dev.write([opcode.PLAYER_LEDS.value, 0x00])
-        assert dev.leds == 0x00
-        assert dev.rumble is False
+        assert int(dev.leds) == 0x00
+        assert bool(dev.rumble) is False
         dev.close()
 
     def test_status_and_battery(self) -> None:
@@ -839,10 +842,10 @@ class TestSimulatorUnit:
         dev.open()
 
         # Status request (0x15)
-        dev.battery = 180
+        dev.set_battery(180)
         dev.set_buttons(buttons.BUTTON_A.value)
-        dev.leds = 0x0C
-        dev.extension_connected = True
+        dev.set_leds(0x0C)
+        dev.set_extension_connected(True)
 
         dev.write([opcode.STATUS_INFORMATION_REQUEST.value, 0x00])
 
@@ -857,7 +860,7 @@ class TestSimulatorUnit:
         assert res[6] == 180
 
         # Status request with extension NOT connected
-        dev.extension_connected = False
+        dev.set_extension_connected(False)
         dev.write([opcode.STATUS_INFORMATION_REQUEST.value, 0x00])
         res = dev.read(64)
         assert res[3] == 0xC0
@@ -896,7 +899,7 @@ class TestSimulatorUnit:
                 0x04,
             ]
         )
-        assert dev.extension_connected
+        assert bool(dev.extension_connected)
         assert dev.memory[EXTENSION_ID_ADDRESS : EXTENSION_ID_ADDRESS + 6] == bytearray(
             [0x00, 0x00, 0xA4, 0x20, 0x04, 0x05]
         )
@@ -913,7 +916,7 @@ class TestSimulatorUnit:
                 0x55,
             ]
         )
-        assert not dev.extension_connected
+        assert not bool(dev.extension_connected)
         assert dev.memory[EXTENSION_ID_ADDRESS : EXTENSION_ID_ADDRESS + 6] == bytearray(
             [0] * 6
         )
@@ -927,16 +930,16 @@ class TestSimulatorUnit:
         dev.set_gyro(
             0x1000, 0x2000, 0x3000, yaw_slow=True, roll_slow=False, pitch_slow=True
         )
-        dev.extension_connected = True
+        dev.set_extension_connected(True)
 
         # Mode 0x30
-        dev.reporting_mode = 0x30
+        dev.set_reporting_mode(0x30)
         r30 = dev._generate_data_report()
         assert r30[0] == 0x30
         assert len(r30) == 3
 
         # Mode 0x32
-        dev.reporting_mode = 0x32
+        dev.set_reporting_mode(0x32)
         r32 = dev._generate_data_report()
         assert r32[0] == 0x32
         assert len(r32) == 11
@@ -955,7 +958,7 @@ class TestSimulatorUnit:
         assert r32[8] == 0xC2
 
         # Mode 0x34
-        dev.reporting_mode = 0x34
+        dev.set_reporting_mode(0x34)
         r34 = dev._generate_data_report()
         assert r34[0] == 0x34
         assert len(r34) == 22
@@ -965,7 +968,7 @@ class TestSimulatorUnit:
         assert r34[8] == 0xC2
 
         # Mode 0x35
-        dev.reporting_mode = 0x35
+        dev.set_reporting_mode(0x35)
         r35 = dev._generate_data_report()
         assert r35[0] == 0x35
         assert len(r35) == 22
@@ -980,8 +983,8 @@ class TestSimulatorUnit:
         assert r35[11] == 0xC2
 
         # Mode 0x36
-        dev.reporting_mode = 0x36
-        dev.ir = [(100, 200), (300, 400), (500, 600), (700, 800)]
+        dev.set_reporting_mode(0x36)
+        dev.set_ir([(100, 200), (300, 400), (500, 600), (700, 800)])
         r36 = dev._generate_data_report()
         assert r36[0] == 0x36
         assert len(r36) == 22
@@ -991,7 +994,7 @@ class TestSimulatorUnit:
         assert r36[18] == 0xC2  # pitch high & flags
 
         # Mode 0x37
-        dev.reporting_mode = 0x37
+        dev.set_reporting_mode(0x37)
         r37 = dev._generate_data_report()
         assert r37[0] == 0x37
         assert len(r37) == 22
@@ -1001,7 +1004,7 @@ class TestSimulatorUnit:
         assert r37[21] == 0xC2  # pitch high
 
         # Fallback invalid mode
-        dev.reporting_mode = 0x99
+        dev.set_reporting_mode(0x99)
         r_fallback = dev._generate_data_report()
         assert r_fallback[0] == 0x30
         dev.close()

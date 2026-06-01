@@ -8,6 +8,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from typing import Optional
+from numpy.typing import NDArray
+from numpy._typing import _64Bit
 
 ALPHA = 0.95
 ACC_CORRECTION_THRESHOLD = 0.05
@@ -17,7 +19,7 @@ GYRO_STILL_THRESHOLD = 0.2
 GYRO_DEADBAND_DPS = 0.5
 
 
-def accel_to_rotation(ax: np.float64, ay: np.float64, az: np.float64) -> R:
+def accel_to_rotation(ax: float, ay: float, az: float) -> R[tuple[()]]:
     """
     Creates a rotation that aligns the measured acceleration vector (body frame)
     with the world gravity vector [0, 0, 1].
@@ -33,30 +35,31 @@ def accel_to_rotation(ax: np.float64, ay: np.float64, az: np.float64) -> R:
     """
     mag = math.sqrt(ax**2 + ay**2 + az**2)
     if mag < 1e-6:
-        return R.identity()
+        return R.identity()  # type: ignore
 
     # Normalized body acceleration (where the device thinks gravity is)
-    g_body = np.array([ax, ay, az]) / mag
+    g_body = np.array((ax, ay, az), dtype=np.float64) / mag
     # Target gravity in world space
-    g_world = np.array([0.0, 0.0, 1.0])
+    g_world = np.array((0.0, 0.0, 1.0), dtype=np.float64)
 
     # Find rotation from g_body to g_world
     # Axis = g_body x g_world takes g_body to g_world
     axis = np.cross(g_body, g_world)
-    axis_len = np.linalg.norm(axis)
+    axis_len: np.floating[_64Bit] = np.linalg.norm(axis)
 
     if axis_len < 1e-6:
         # Already aligned or anti-aligned
-        if g_body[2] > 0:
-            return R.identity()
+        if g_body.item(2) > 0:
+            return R.identity()  # type: ignore
         else:
             # 180 degree flip around X (or any horizontal axis)
-            return R.from_euler("x", math.pi)
+            return R.from_euler("x", math.pi)  # type: ignore
 
     # The dot product gives cos(theta)
-    angle = math.acos(np.clip(np.dot(g_body, g_world), -1.0, 1.0))
+    angle = math.acos(np.clip(g_body @ g_world, -1.0, 1.0))
     # Return rotation that takes body to world
-    return R.from_rotvec(axis / axis_len * angle)
+    result: R[tuple[()]] = R.from_rotvec(axis / axis_len * angle)  # type: ignore
+    return result
 
 
 def decode_gyro(val: int, bias: float, slow: bool = False) -> float:
@@ -96,11 +99,11 @@ class ImuFusion:
 
     def __init__(self) -> None:
         """Initializes the IMU fusion state."""
-        self.orient: R = R.identity()
-        self._orient_prev = R.identity()
+        self.orient: R[tuple[()]] = R.identity()  # type: ignore
+        self._orient_prev = R.identity()  # type: ignore
         self.gyro_bias = {"yaw": 8192.0, "roll": 8192.0, "pitch": 8192.0}
         self.gyro_signs = {"yaw": 1.0, "roll": 1.0, "pitch": 1.0}
-        self._accel_lp = np.array([0.0, 0.0, 0.0])
+        self._accel_lp = np.array((0.0, 0.0, 0.0), dtype=np.float64)
         self._first_frame = True
 
     def calibrate_gyro(self, samples: list[dict[str, int]]) -> dict[str, float]:
@@ -152,18 +155,22 @@ class ImuFusion:
         # Fusion X (Forward) = Wiimote Y
         # Fusion Y (Left) = -Wiimote X
         # Fusion Z (Up) = Wiimote Z
-        accel_raw = np.array([ay, -ax, az])
+        accel_raw: NDArray[np.float64] = np.array((ay, -ax, az), dtype=np.float64)
 
         if self._first_frame:
             # Initialize orientation to align gravity perfectly
             self._accel_lp = accel_raw
-            self.orient = accel_to_rotation(accel_raw[0], accel_raw[1], accel_raw[2])
+            self.orient = accel_to_rotation(
+                accel_raw.item(0), accel_raw.item(1), accel_raw.item(2)
+            )
             self._first_frame = False
 
         self._accel_lp = (
             ACCEL_LP_ALPHA * accel_raw + (1.0 - ACCEL_LP_ALPHA) * self._accel_lp
         )
-        lax, lay, laz = self._accel_lp
+        lax = self._accel_lp.item(0)
+        lay = self._accel_lp.item(1)
+        laz = self._accel_lp.item(2)
 
         gr = gp = gy = 0.0
         acc_mag = 0.0
@@ -209,39 +216,41 @@ class ImuFusion:
                 if abs(math.degrees(gy)) < GYRO_DEADBAND_DPS:
                     gy = 0.0
 
-                omega_body = np.array([gr, gp, gy])
-                rot_delta = R.from_rotvec(omega_body * dt)
+                omega_body = np.array((gr, gp, gy), dtype=np.float64)
+                rot_delta: R[tuple[()]] = R.from_rotvec(omega_body * dt)  # type: ignore
                 self.orient = self.orient * rot_delta
 
-                gyro_rate_mag = np.linalg.norm(omega_body)
+                gyro_rate_mag: np.floating[_64Bit] = np.linalg.norm(omega_body)
                 if (
                     gyro_rate_mag < GYRO_STILL_THRESHOLD
                     and abs(acc_mag - 1.0) < ACC_CORRECTION_THRESHOLD
                 ):
                     q = self.orient.as_quat()
                     yaw = math.atan2(
-                        2 * (q[3] * q[2] + q[0] * q[1]), 1 - 2 * (q[1] ** 2 + q[2] ** 2)
+                        2 * (q.item(3) * q.item(2) + q.item(0) * q.item(1)),
+                        1 - 2 * (q.item(1) ** 2 + q.item(2) ** 2),
                     )
-                    self.orient = (
-                        R.from_rotvec(np.array([0.0, 0.0, -yaw * 6e-5])) * self.orient
+                    yaw_rotation: R[tuple[()]] = R.from_rotvec(  # type: ignore
+                        np.array((0.0, 0.0, -yaw * 6e-5), dtype=np.float64)
                     )
+                    self.orient = yaw_rotation * self.orient
                     for k in ("roll", "pitch", "yaw"):
                         self.gyro_bias[k] += (gyro[k] - self.gyro_bias[k]) * 0.005
 
             if abs(acc_mag - 1.0) < ACC_CORRECTION_THRESHOLD and acc_mag > 0.01:
-                g_meas = np.array([lax, lay, laz]) / acc_mag
+                g_meas = np.array((lax, lay, laz), dtype=np.float64) / acc_mag
                 g_est_body = self.orient.inv().apply([0.0, 0.0, 1.0])
                 error = np.cross(g_meas, g_est_body)
-                error_norm = np.linalg.norm(error)
+                error_norm: np.floating[_64Bit] = np.linalg.norm(error)
                 if error_norm > 1e-6:
-                    correction = R.from_rotvec(error * (1.0 - ALPHA))
+                    correction: R[tuple[()]] = R.from_rotvec(error * (1.0 - ALPHA))  # type: ignore
                     self.orient = self.orient * correction
         else:
             # If no gyro, snap to accelerometer orientation but keep current yaw
             current_yaw = self.yaw
             new_orient = accel_to_rotation(lax, lay, laz)
 
-            self.orient = R.from_euler("z", current_yaw) * new_orient
+            self.orient = R.from_euler("z", current_yaw) * new_orient  # type: ignore
             acc_mag = math.sqrt(lax**2 + lay**2 + laz**2)
 
         if np.any(np.isnan(self.orient.as_quat())):
@@ -253,7 +262,7 @@ class ImuFusion:
 
     def reset_yaw(self) -> None:
         yaw = self.yaw
-        yaw_reset = R.from_euler("z", -yaw)
+        yaw_reset = R.from_euler("z", -yaw)  # type: ignore
         self.orient = yaw_reset * self.orient
 
     @property

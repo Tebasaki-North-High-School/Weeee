@@ -19,7 +19,7 @@ GYRO_STILL_THRESHOLD = 0.2
 GYRO_DEADBAND_DPS = 0.5
 
 
-def accel_to_rotation(ax: float, ay: float, az: float) -> R[tuple[()]]:
+def accel_to_rotation(ax: float, ay: float, az: float) -> R:
     """
     Creates a rotation that aligns the measured acceleration vector (body frame)
     with the world gravity vector [0, 0, 1].
@@ -58,7 +58,7 @@ def accel_to_rotation(ax: float, ay: float, az: float) -> R[tuple[()]]:
     # The dot product gives cos(theta)
     angle = math.acos(np.clip(g_body @ g_world, -1.0, 1.0))
     # Return rotation that takes body to world
-    result: R[tuple[()]] = R.from_rotvec(axis / axis_len * angle)  # type: ignore
+    result: R = R.from_rotvec(axis / axis_len * angle)  # type: ignore
     return result
 
 
@@ -99,7 +99,7 @@ class ImuFusion:
 
     def __init__(self) -> None:
         """Initializes the IMU fusion state."""
-        self.orient: R[tuple[()]] = R.identity()  # type: ignore
+        self.orient: R = R.identity()  # type: ignore
         self._orient_prev = R.identity()  # type: ignore
         self.gyro_bias = {"yaw": 8192.0, "roll": 8192.0, "pitch": 8192.0}
         self.gyro_signs = {"yaw": 1.0, "roll": 1.0, "pitch": 1.0}
@@ -217,7 +217,7 @@ class ImuFusion:
                     gy = 0.0
 
                 omega_body = np.array((gr, gp, gy), dtype=np.float64)
-                rot_delta: R[tuple[()]] = R.from_rotvec(omega_body * dt)  # type: ignore
+                rot_delta: R = R.from_rotvec(omega_body * dt)  # type: ignore
                 self.orient = self.orient * rot_delta
 
                 gyro_rate_mag: np.floating[_64Bit] = np.linalg.norm(omega_body)
@@ -230,7 +230,7 @@ class ImuFusion:
                         2 * (q.item(3) * q.item(2) + q.item(0) * q.item(1)),
                         1 - 2 * (q.item(1) ** 2 + q.item(2) ** 2),
                     )
-                    yaw_rotation: R[tuple[()]] = R.from_rotvec(  # type: ignore
+                    yaw_rotation: R = R.from_rotvec(  # type: ignore
                         np.array((0.0, 0.0, -yaw * 6e-5), dtype=np.float64)
                     )
                     self.orient = yaw_rotation * self.orient
@@ -243,7 +243,7 @@ class ImuFusion:
                 error = np.cross(g_meas, g_est_body)
                 error_norm: np.floating[_64Bit] = np.linalg.norm(error)
                 if error_norm > 1e-6:
-                    correction: R[tuple[()]] = R.from_rotvec(error * (1.0 - ALPHA))  # type: ignore
+                    correction: R = R.from_rotvec(error * (1.0 - ALPHA))  # type: ignore
                     self.orient = self.orient * correction
         else:
             # If no gyro, snap to accelerometer orientation but keep current yaw

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weeee"
-version = "0.0.2"
+version = "0.0.3"
 description = "A Python library for high-performance Wiimote communication, featuring MotionPlus support and IMU fusion."
 readme = "README.md"
 authors = [

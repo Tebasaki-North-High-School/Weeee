@@ -487,6 +487,8 @@ class Wiimote(Lowlevel_Wiimote):
             self.fusion = ImuFusion()
             if self.mp_cal_fast is not None:
                 self.fusion.set_calibration(self.mp_cal_fast, self.mp_cal_slow)  # type: ignore[unreachable]
+            if self.motion_plus_activated:
+                self._calibrate_gyro_runtime()
             self._fusion_last_time = time.monotonic()
 
     @staticmethod
@@ -776,6 +778,27 @@ class Wiimote(Lowlevel_Wiimote):
         else:
             self.rumble(True)
             self.rumble_end_time = time.time() + (duration_ms / 1000.0)
+
+    def _calibrate_gyro_runtime(self, num_samples: int = 200) -> None:
+        samples: list[dict[str, int]] = []
+        for _ in range(num_samples * 3):
+            if len(samples) >= num_samples:
+                break
+            rid = self.read(100)
+            if rid is not None and self._extension_fresh:
+                if len(self.extension) >= MOTION_PLUS_ACTIVE_REPORT_LENGTH:
+                    decoded = self.decode_motion_plus_report(
+                        self.extension[:MOTION_PLUS_ACTIVE_REPORT_LENGTH]
+                    )
+                    samples.append({
+                        "yaw": int(decoded["yaw"]),
+                        "roll": int(decoded["roll"]),
+                        "pitch": int(decoded["pitch"]),
+                    })
+                self._extension_fresh = False
+
+        if len(samples) >= 10 and self.fusion is not None:
+            self.fusion.calibrate_gyro(samples)
 
     def update(self, timeout: int = 0) -> Optional[int]:
         """

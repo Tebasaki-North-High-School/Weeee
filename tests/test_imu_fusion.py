@@ -146,3 +146,111 @@ class TestImuFusion:
         assert bias["pitch"] == 8191
         assert bias["yaw"] == 8196
         assert imu.gyro_bias == bias
+
+    def test_set_calibration_sets_bias_and_scale(self) -> None:
+        """set_calibration() must derive bias, signs, and scale from factory cal."""
+        imu = ImuFusion()
+        fast = {
+            "yaw_zero": 0x1F40,
+            "roll_zero": 0x1F40,
+            "pitch_zero": 0x1F40,
+            "yaw_scale": 0x0CE4,
+            "roll_scale": 0x0CE4,
+            "pitch_scale": 0x0CE4,
+            "degrees_div_6": 200,
+        }
+        slow = {
+            "yaw_zero": 0x2000,
+            "roll_zero": 0x2000,
+            "pitch_zero": 0x2000,
+            "yaw_scale": 0x0CE4,
+            "roll_scale": 0x0CE4,
+            "pitch_scale": 0x0CE4,
+            "degrees_div_6": 45,
+        }
+        imu.set_calibration(fast, slow)
+
+        # Bias = 14-bit zero (zero_raw >> 2)
+        for ax in ("yaw", "roll", "pitch"):
+            assert imu.gyro_bias[ax] == 0x1F40 >> 2  # = 2000.0
+            # scale > zero → sign should be -1.0
+            assert imu.gyro_signs[ax] == -1.0
+
+        # gyro_scale should be populated
+        assert imu.gyro_scale is not None
+        for ax in ("yaw", "roll", "pitch"):
+            # scale in rad/raw-unit
+            assert imu.gyro_scale[ax] < 0.0  # negative because sign is -1
+
+    def test_set_calibration_uses_cal_scale_when_available(self) -> None:
+        """With calibration set, update() must use gyro_scale instead of decode_gyro."""
+        imu = ImuFusion()
+        fast = {
+            "yaw_zero": 0x1F40,
+            "roll_zero": 0x1F40,
+            "pitch_zero": 0x1F40,
+            "yaw_scale": 0x0CE4,
+            "roll_scale": 0x0CE4,
+            "pitch_scale": 0x0CE4,
+            "degrees_div_6": 200,
+        }
+        imu.set_calibration(fast)
+        imu.update(0, 0, 1)
+
+        # Apply known gyro rate
+        # With bias at 0x1F40 and scale negative, a raw value > bias gives negative rate
+        gyro = {"yaw": 0x2000, "roll": 0x1F40, "pitch": 0x1F40}
+        imu.update(0, 0, 1, gyro=gyro, dt=0.1)
+
+        # Non-zero yaw should have been integrated
+        assert imu.yaw != 0.0
+
+    def test_slow_calibration_scale_is_smaller(self) -> None:
+        """slow-mode gyro_scale must have smaller magnitude than fast."""
+        imu = ImuFusion()
+        fast = {
+            "yaw_zero": 0x1F40, "roll_zero": 0x1F40, "pitch_zero": 0x1F40,
+            "yaw_scale": 0x0CE4, "roll_scale": 0x0CE4, "pitch_scale": 0x0CE4,
+            "degrees_div_6": 200,
+        }
+        slow = {
+            "yaw_zero": 0x2000, "roll_zero": 0x2000, "pitch_zero": 0x2000,
+            "yaw_scale": 0x0CE4, "roll_scale": 0x0CE4, "pitch_scale": 0x0CE4,
+            "degrees_div_6": 45,
+        }
+        imu.set_calibration(fast, slow)
+        assert imu.gyro_scale_slow is not None
+        for ax in ("yaw", "roll", "pitch"):
+            assert abs(imu.gyro_scale_slow[ax]) < abs(imu.gyro_scale[ax])
+
+    def test_slow_mode_flag_selects_scale(self) -> None:
+        """gyro_slow flag must select slow scale per-axis."""
+        imu = ImuFusion()
+        fast = {
+            "yaw_zero": 0x1F40, "roll_zero": 0x1F40, "pitch_zero": 0x1F40,
+            "yaw_scale": 0x0CE4, "roll_scale": 0x0CE4, "pitch_scale": 0x0CE4,
+            "degrees_div_6": 200,
+        }
+        slow = {
+            "yaw_zero": 0x2000, "roll_zero": 0x2000, "pitch_zero": 0x2000,
+            "yaw_scale": 0x0CE4, "roll_scale": 0x0CE4, "pitch_scale": 0x0CE4,
+            "degrees_div_6": 45,
+        }
+        imu.set_calibration(fast, slow)
+        imu.update(0, 0, 1)
+
+        gyro = {"yaw": 0x2000, "roll": 0x2000, "pitch": 0x2000}
+        # yaw in slow, roll/pitch in fast
+        gyro_slow = {"yaw": True, "roll": False, "pitch": False}
+        imu.update(0, 0, 1, gyro=gyro, dt=1.0, gyro_slow=gyro_slow)
+
+        assert imu.yaw != 0.0
+        assert imu.roll != 0.0
+        # yaw uses slow scale → integration rate should be smaller
+        # (same raw delta, smaller deg6 → smaller rad/s → smaller angle)
+        # Fast scale for roll gives same magnitude as yaw_slow is different
+        # Actually with bias 0x1F40 (2000), raw 0x2000 (8192), delta = 6192
+        # Fast: (200*6)/(825-2000) = 1200/-1175 = -1.0213 deg/unit
+        # Slow: (45*6)/(825-2000) = 270/-1175 = -0.2298 deg/unit
+        # So slow path should produce smaller |yaw| vs |roll|
+        assert abs(imu.yaw) < abs(imu.roll)

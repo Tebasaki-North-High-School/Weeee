@@ -318,8 +318,8 @@ def test_ack_reports_are_silently_drained() -> None:
     sim_device = SimulatedHIDDevice()
     sim_device.open()
     # Build a queue: [ACK, ACK, STATUS]
-    sim_device._enqueue_ack(opcode.WRITE_MEMORY_AND_REGISTERS.value, 0)
-    sim_device._enqueue_ack(opcode.WRITE_MEMORY_AND_REGISTERS.value, 0)
+    sim_device._enqueue_ack(opcode.WRITE_REGISTERS.value, 0)
+    sim_device._enqueue_ack(opcode.WRITE_REGISTERS.value, 0)
     sim_device._enqueue_status_report()
 
     result = sim_device.read(64)
@@ -330,9 +330,9 @@ def test_ack_drain_does_not_affect_queued_data_reports() -> None:
     """ACK draining must leave non-ACK reports in the queue untouched."""
     sim_device = SimulatedHIDDevice()
     sim_device.open()
-    sim_device._enqueue_ack(opcode.WRITE_MEMORY_AND_REGISTERS.value, 0)
+    sim_device._enqueue_ack(opcode.WRITE_REGISTERS.value, 0)
     sim_device._enqueue_status_report()
-    sim_device._enqueue_ack(opcode.WRITE_MEMORY_AND_REGISTERS.value, 0)
+    sim_device._enqueue_ack(opcode.WRITE_REGISTERS.value, 0)
 
     # First read should drain first ACK and pop status
     r1 = sim_device.read(64)
@@ -370,7 +370,7 @@ def test_read_memory_block() -> None:
     # around that, but here we read directly.
     wiimote.read_memory(0x16, 10)
     rid = wiimote.read(100)
-    assert rid == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
+    assert rid == opcode.READ_DATA.value
 
 
 # ---------------------------------------------------------------------------
@@ -405,8 +405,8 @@ def test_large_read_generates_multiple_chunks() -> None:
 
     queue = sim_device.response_queue
     assert len(queue) == 2  # Two 16-byte chunks
-    assert queue[0][0] == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
-    assert queue[1][0] == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
+    assert queue[0][0] == opcode.READ_DATA.value
+    assert queue[1][0] == opcode.READ_DATA.value
 
 
 # ---------------------------------------------------------------------------
@@ -443,3 +443,70 @@ def test_gyro_roundtrip_via_decode() -> None:
         assert decoded["yaw_slow"] == yaw_slow
         assert decoded["roll_slow"] == roll_slow
         assert decoded["pitch_slow"] == pitch_slow
+
+
+# ---------------------------------------------------------------------------
+# MotionPlus calibration data at 0xA60020
+# ---------------------------------------------------------------------------
+
+
+def test_motion_plus_calibration_loaded_when_present() -> None:
+    """set_motion_plus() must populate calibration data at 0xA60020."""
+    sim_device = SimulatedHIDDevice()
+    sim_device.open()
+    sim_device.set_motion_plus(True)
+
+    cal = sim_device.memory[0xA60020 : 0xA60020 + 32]
+    # FAST block starts at offset 0
+    assert len(cal) == 32
+    # FAST yaw_zero = 0x1F40
+    assert cal[0] == 0x1F
+    assert cal[1] == 0x40
+    # FAST degrees_div_6 = 200
+    assert cal[12] == 200
+    # SLOW degrees_div_6 = 45
+    assert cal[28] == 45
+
+
+def test_load_motion_plus_calibration_parses_correctly() -> None:
+    """_load_motion_plus_calibration() must parse FAST/SLOW calibration dicts."""
+    sim_device = SimulatedHIDDevice()
+    sim_device.open()
+    sim_device.set_motion_plus(True)
+    wiimote = Wiimote(device=sim_device, require_motion_plus=True)
+
+    assert wiimote.mp_cal_fast is not None
+    assert wiimote.mp_cal_fast["yaw_zero"] == 0x1F40
+    assert wiimote.mp_cal_fast["roll_zero"] == 0x1F40
+    assert wiimote.mp_cal_fast["pitch_zero"] == 0x1F40
+    assert wiimote.mp_cal_fast["yaw_scale"] == 0x0CE4
+    assert wiimote.mp_cal_fast["roll_scale"] == 0x0CE4
+    assert wiimote.mp_cal_fast["pitch_scale"] == 0x0CE4
+    assert wiimote.mp_cal_fast["degrees_div_6"] == 200
+
+    assert wiimote.mp_cal_slow is not None
+    assert wiimote.mp_cal_slow["yaw_zero"] == 0x2000
+    assert wiimote.mp_cal_slow["degrees_div_6"] == 45
+
+
+def test_motion_plus_calibration_determines_gyro_signs() -> None:
+    """gyro_signs must be set in fusion from calibration (scale > zero → +1.0)."""
+    sim_device = SimulatedHIDDevice()
+    sim_device.open()
+    sim_device.set_motion_plus(True)
+    wiimote = Wiimote(device=sim_device, require_motion_plus=True)
+
+    # 0x0CE4 >> 2 = 0x339, 0x1F40 >> 2 = 0x7D0
+    # 0x339 - 0x7D0 = negative → gyro_signs should be -1.0
+    assert wiimote.fusion is not None
+    for ax in ("yaw", "roll", "pitch"):
+        assert wiimote.fusion.gyro_signs[ax] == -1.0, f"{ax} sign mismatch"
+
+
+def test_motion_plus_calibration_absent_when_no_mp() -> None:
+    """Without MotionPlus, mp_cal_fast/slow must be None."""
+    sim_device = SimulatedHIDDevice()
+    sim_device.open()
+    wiimote = Wiimote(device=sim_device)
+    assert wiimote.mp_cal_fast is None
+    assert wiimote.mp_cal_slow is None

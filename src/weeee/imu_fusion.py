@@ -8,8 +8,6 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from typing import Optional
-from numpy.typing import NDArray
-from numpy._typing import _64Bit
 
 ALPHA = 0.95
 ACC_CORRECTION_THRESHOLD = 0.05
@@ -35,7 +33,7 @@ def accel_to_rotation(ax: float, ay: float, az: float) -> R:
     """
     mag = math.sqrt(ax**2 + ay**2 + az**2)
     if mag < 1e-6:
-        return R.identity()  # type: ignore
+        return R.identity()
 
     # Normalized body acceleration (where the device thinks gravity is)
     g_body = np.array((ax, ay, az), dtype=np.float64) / mag
@@ -45,20 +43,20 @@ def accel_to_rotation(ax: float, ay: float, az: float) -> R:
     # Find rotation from g_body to g_world
     # Axis = g_body x g_world takes g_body to g_world
     axis = np.cross(g_body, g_world)
-    axis_len: np.floating[_64Bit] = np.linalg.norm(axis)
+    axis_len = np.linalg.norm(axis)
 
     if axis_len < 1e-6:
         # Already aligned or anti-aligned
         if g_body.item(2) > 0:
-            return R.identity()  # type: ignore
+            return R.identity()
         else:
             # 180 degree flip around X (or any horizontal axis)
-            return R.from_euler("x", math.pi)  # type: ignore
+            return R.from_euler("x", math.pi)
 
     # The dot product gives cos(theta)
     angle = math.acos(np.clip(g_body @ g_world, -1.0, 1.0))
     # Return rotation that takes body to world
-    result: R = R.from_rotvec(axis / axis_len * angle)  # type: ignore
+    result: R = R.from_rotvec(axis / axis_len * angle)
     return result
 
 
@@ -99,12 +97,55 @@ class ImuFusion:
 
     def __init__(self) -> None:
         """Initializes the IMU fusion state."""
-        self.orient: R = R.identity()  # type: ignore
-        self._orient_prev = R.identity()  # type: ignore
+        self.orient: R = R.identity()
+        self._orient_prev = R.identity()
         self.gyro_bias = {"yaw": 8192.0, "roll": 8192.0, "pitch": 8192.0}
         self.gyro_signs = {"yaw": 1.0, "roll": 1.0, "pitch": 1.0}
+        self.gyro_scale: Optional[dict[str, float]] = None
+        self.gyro_scale_slow: Optional[dict[str, float]] = None
         self._accel_lp = np.array((0.0, 0.0, 0.0), dtype=np.float64)
         self._first_frame = True
+
+    def _compute_scale(
+        self, block: dict[str, int], axes: list[str]
+    ) -> dict[str, float]:
+        deg6 = block["degrees_div_6"]
+        out: dict[str, float] = {}
+        for ax in axes:
+            zero_raw = block[f"{ax}_zero"]
+            scale_raw = block[f"{ax}_scale"]
+            zero_14 = zero_raw >> 2
+            scale_14 = scale_raw >> 2
+            delta = scale_14 - zero_14
+            deg_per_unit = (deg6 * 6) / delta if delta != 0 else 0.0
+            out[ax] = math.radians(deg_per_unit)
+        return out
+
+    def set_calibration(
+        self,
+        fast: dict[str, int],
+        slow: dict[str, int] | None = None,
+    ) -> None:
+        """
+        Sets factory calibration data from MotionPlus (0xA60020).
+
+        Updates gyro_bias, gyro_signs, gyro_scale (fast), and gyro_scale_slow
+        from the calibration blocks.
+        """
+        axes = ["yaw", "roll", "pitch"]
+        for ax in axes:
+            zero_raw = fast[f"{ax}_zero"]
+            scale_raw = fast[f"{ax}_scale"]
+            zero_14 = zero_raw >> 2
+            scale_14 = scale_raw >> 2
+            self.gyro_bias[ax] = float(zero_14)
+            delta = scale_14 - zero_14
+            self.gyro_signs[ax] = 1.0 if delta > 0 else -1.0
+
+        self.gyro_scale = self._compute_scale(fast, axes)
+        self.gyro_scale_slow = (
+            self._compute_scale(slow, axes) if slow is not None else None
+        )
 
     def calibrate_gyro(self, samples: list[dict[str, int]]) -> dict[str, float]:
         """
@@ -155,7 +196,7 @@ class ImuFusion:
         # Fusion X (Forward) = Wiimote Y
         # Fusion Y (Left) = -Wiimote X
         # Fusion Z (Up) = Wiimote Z
-        accel_raw: NDArray[np.float64] = np.array((ay, -ax, az), dtype=np.float64)
+        accel_raw = np.array((ay, -ax, az), dtype=np.float64)
 
         if self._first_frame:
             # Initialize orientation to align gravity perfectly
@@ -186,28 +227,46 @@ class ImuFusion:
                 # Fusion GX (Roll) = Wiimote Roll (rotation around Y)
                 # Fusion GY (Pitch) = -Wiimote Pitch (rotation around X)
                 # Fusion GZ (Yaw) = Wiimote Yaw (rotation around Z)
-                gr = (
-                    decode_gyro(
-                        gyro["roll"],
-                        self.gyro_bias["roll"],
-                        gyro_slow.get("roll", False),
+                if self.gyro_scale is not None:
+                    scale_slow = self.gyro_scale_slow
+                    gr = (gyro["roll"] - self.gyro_bias["roll"]) * (
+                        scale_slow["roll"]
+                        if scale_slow is not None and gyro_slow.get("roll", False)
+                        else self.gyro_scale["roll"]
                     )
-                    * self.gyro_signs["roll"]
-                )
-                gp = (
-                    -decode_gyro(
-                        gyro["pitch"],
-                        self.gyro_bias["pitch"],
-                        gyro_slow.get("pitch", False),
+                    gp = -(gyro["pitch"] - self.gyro_bias["pitch"]) * (
+                        scale_slow["pitch"]
+                        if scale_slow is not None and gyro_slow.get("pitch", False)
+                        else self.gyro_scale["pitch"]
                     )
-                    * self.gyro_signs["pitch"]
-                )
-                gy = (
-                    decode_gyro(
-                        gyro["yaw"], self.gyro_bias["yaw"], gyro_slow.get("yaw", False)
+                    gy = (gyro["yaw"] - self.gyro_bias["yaw"]) * (
+                        scale_slow["yaw"]
+                        if scale_slow is not None and gyro_slow.get("yaw", False)
+                        else self.gyro_scale["yaw"]
                     )
-                    * self.gyro_signs["yaw"]
-                )
+                else:
+                    gr = (
+                        decode_gyro(
+                            gyro["roll"],
+                            self.gyro_bias["roll"],
+                            gyro_slow.get("roll", False),
+                        )
+                        * self.gyro_signs["roll"]
+                    )
+                    gp = (
+                        -decode_gyro(
+                            gyro["pitch"],
+                            self.gyro_bias["pitch"],
+                            gyro_slow.get("pitch", False),
+                        )
+                        * self.gyro_signs["pitch"]
+                    )
+                    gy = (
+                        decode_gyro(
+                            gyro["yaw"], self.gyro_bias["yaw"], gyro_slow.get("yaw", False)
+                        )
+                        * self.gyro_signs["yaw"]
+                    )
 
                 if abs(math.degrees(gr)) < GYRO_DEADBAND_DPS:
                     gr = 0.0
@@ -217,10 +276,10 @@ class ImuFusion:
                     gy = 0.0
 
                 omega_body = np.array((gr, gp, gy), dtype=np.float64)
-                rot_delta: R = R.from_rotvec(omega_body * dt)  # type: ignore
+                rot_delta: R = R.from_rotvec(omega_body * dt)
                 self.orient = self.orient * rot_delta
 
-                gyro_rate_mag: np.floating[_64Bit] = np.linalg.norm(omega_body)
+                gyro_rate_mag = np.linalg.norm(omega_body)
                 if (
                     gyro_rate_mag < GYRO_STILL_THRESHOLD
                     and abs(acc_mag - 1.0) < ACC_CORRECTION_THRESHOLD
@@ -230,7 +289,7 @@ class ImuFusion:
                         2 * (q.item(3) * q.item(2) + q.item(0) * q.item(1)),
                         1 - 2 * (q.item(1) ** 2 + q.item(2) ** 2),
                     )
-                    yaw_rotation: R = R.from_rotvec(  # type: ignore
+                    yaw_rotation: R = R.from_rotvec(
                         np.array((0.0, 0.0, -yaw * 6e-5), dtype=np.float64)
                     )
                     self.orient = yaw_rotation * self.orient
@@ -241,16 +300,16 @@ class ImuFusion:
                 g_meas = np.array((lax, lay, laz), dtype=np.float64) / acc_mag
                 g_est_body = self.orient.inv().apply([0.0, 0.0, 1.0])
                 error = np.cross(g_meas, g_est_body)
-                error_norm: np.floating[_64Bit] = np.linalg.norm(error)
+                error_norm = np.linalg.norm(error)
                 if error_norm > 1e-6:
-                    correction: R = R.from_rotvec(error * (1.0 - ALPHA))  # type: ignore
+                    correction: R = R.from_rotvec(error * (1.0 - ALPHA))
                     self.orient = self.orient * correction
         else:
             # If no gyro, snap to accelerometer orientation but keep current yaw
             current_yaw = self.yaw
             new_orient = accel_to_rotation(lax, lay, laz)
 
-            self.orient = R.from_euler("z", current_yaw) * new_orient  # type: ignore
+            self.orient = R.from_euler("z", current_yaw) * new_orient
             acc_mag = math.sqrt(lax**2 + lay**2 + laz**2)
 
         if np.any(np.isnan(self.orient.as_quat())):
@@ -262,7 +321,7 @@ class ImuFusion:
 
     def reset_yaw(self) -> None:
         yaw = self.yaw
-        yaw_reset = R.from_euler("z", -yaw)  # type: ignore
+        yaw_reset = R.from_euler("z", -yaw)
         self.orient = yaw_reset * self.orient
 
     @property

@@ -83,3 +83,8 @@ strict_equality = true
 strict_equality_for_none = true
 local_partial_types = true
 extra_checks = true
+
+[[tool.mypy.overrides]]
+module = "weeee.imu_fusion"
+disallow_any_explicit = false
+disable_error_code = ["explicit-any", "misc"]

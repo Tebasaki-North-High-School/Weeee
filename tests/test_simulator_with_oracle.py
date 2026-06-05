@@ -34,8 +34,7 @@ from weeee.core import (
     MOTION_PLUS_ID_ADDRESS,
     MOTION_PLUS_ACTIVATE_ADDRESS,
     MOTION_PLUS_ACTIVE_REPORT_LENGTH,
-    MOTION_PLUS_ID_PREFIX,
-    MOTION_PLUS_ID_PREFIX_TR,
+    MOTION_PLUS_ID_PREFIXES,
 )
 from weeee.simulator import SimulatedHIDDevice
 
@@ -46,7 +45,23 @@ from weeee.simulator import SimulatedHIDDevice
 def _wiimote_present() -> bool:
     try:
         devices = hid.enumerate(VENDOR_ID)
-        return any(d["product_id"] in (PRODUCT_ID, PRODUCT_ID_TR) for d in devices)
+        matches = [d for d in devices if d["product_id"] in (PRODUCT_ID, PRODUCT_ID_TR)]
+        if not matches:
+            return False
+        dev = hid.device()
+        dev.open_path(matches[0]["path"])
+        time.sleep(0.3)
+        try:
+            # Drain initial reports — if read() fails, the device is not
+            # truly available (e.g. polling not set up on Windows).
+            for _ in range(15):
+                if not dev.read(64, 20):
+                    break
+        except OSError:
+            return False
+        finally:
+            dev.close()
+        return True
     except Exception:
         return False
 
@@ -64,7 +79,10 @@ def real_open() -> hid.device:
     dev.open_path(matches[0]["path"])
     time.sleep(0.3)
     for _ in range(15):
-        if not dev.read(64, 20):
+        try:
+            if not dev.read(64, 20):
+                break
+        except OSError:
             break
     return dev
 
@@ -214,13 +232,13 @@ class TestButtons:
 class TestStatusReport:
     def test_structure(self, sim: SimulatedHIDDevice) -> None:
         dev = real_open()
-        dev.write([opcode.STATUS_INFORMATION_REQUEST.value, 0x00])
+        dev.write([opcode.STATUS_REQUEST.value, 0x00])
         real_r = real_read_until(dev, opcode.STATUS_INFORMATION.value, 1500)
         dev.close()
         if not real_r:
             pytest.skip("no status report from real device")
 
-        sim.write([opcode.STATUS_INFORMATION_REQUEST.value, 0x00])
+        sim.write([opcode.STATUS_REQUEST.value, 0x00])
         sim_r = sim.read(64)
 
         assert real_r[0] == opcode.STATUS_INFORMATION.value
@@ -248,7 +266,7 @@ class TestMemoryReadCalibration:
         dev = real_open()
         dev.write(
             [
-                opcode.READ_MEMORY_AND_REGISTERS.value,
+                opcode.READ_REGISTERS.value,
                 0x00,
                 0x00,
                 0x00,
@@ -259,7 +277,7 @@ class TestMemoryReadCalibration:
         )
         real_r = real_read_until(
             dev,
-            opcode.READ_MEMORY_AND_REGISTERS_DATA.value,
+            opcode.READ_DATA.value,
             1500,
         )
         dev.close()
@@ -268,7 +286,7 @@ class TestMemoryReadCalibration:
 
         sim.write(
             [
-                opcode.READ_MEMORY_AND_REGISTERS.value,
+                opcode.READ_REGISTERS.value,
                 0x00,
                 0x00,
                 0x00,
@@ -281,14 +299,14 @@ class TestMemoryReadCalibration:
         while (
             sim_r
             and sim_r[0]
-            == opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
+            == opcode.ACK_REPORT.value
         ):
             sim_r = sim.read(64)
         if not sim_r:
             pytest.skip("no read-memory from simulator")
 
-        assert real_r[0] == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
-        assert sim_r[0] == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
+        assert real_r[0] == opcode.READ_DATA.value
+        assert sim_r[0] == opcode.READ_DATA.value
 
         real_size = (real_r[3] >> 4) + 1
         sim_size = (sim_r[3] >> 4) + 1
@@ -320,7 +338,7 @@ class TestMemoryWrite:
         dev = real_open()
         dev.write(
             [
-                opcode.WRITE_MEMORY_AND_REGISTERS.value,
+                opcode.WRITE_REGISTERS.value,
                 0x04,
                 0x00,
                 0xA4,
@@ -332,7 +350,7 @@ class TestMemoryWrite:
         )
         real_ack = real_read_until(
             dev,
-            opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value,
+            opcode.ACK_REPORT.value,
             1500,
         )
         dev.close()
@@ -340,21 +358,21 @@ class TestMemoryWrite:
             pytest.skip("no ACK from real device")
 
         assert (
-            real_ack[0] == opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
+            real_ack[0] == opcode.ACK_REPORT.value
         )
         assert len(real_ack) >= 6
-        assert real_ack[3] == opcode.WRITE_MEMORY_AND_REGISTERS.value
+        assert real_ack[3] == opcode.WRITE_REGISTERS.value
         assert 0 <= real_ack[4] <= 7
 
         # ── Simulator ACK (via _enqueue_ack) ──
-        sim._enqueue_ack(opcode.WRITE_MEMORY_AND_REGISTERS.value, 0)
+        sim._enqueue_ack(opcode.WRITE_REGISTERS.value, 0)
         ack_from_queue = sim.response_queue[0]
         assert (
             ack_from_queue[0]
-            == opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
+            == opcode.ACK_REPORT.value
         )
         assert len(ack_from_queue) == 6
-        assert ack_from_queue[3] == opcode.WRITE_MEMORY_AND_REGISTERS.value
+        assert ack_from_queue[3] == opcode.WRITE_REGISTERS.value
         assert ack_from_queue[4] == 0
 
 
@@ -374,7 +392,7 @@ class TestExtensionDetection:
 
         dev.write(
             [
-                opcode.WRITE_MEMORY_AND_REGISTERS.value,
+                opcode.WRITE_REGISTERS.value,
                 0x04,
                 0x00,
                 0xA4,
@@ -385,12 +403,12 @@ class TestExtensionDetection:
             + [0] * 15
         )
         real_read_until(
-            dev, opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value, 1000
+            dev, opcode.ACK_REPORT.value, 1000
         )
 
         dev.write(
             [
-                opcode.WRITE_MEMORY_AND_REGISTERS.value,
+                opcode.WRITE_REGISTERS.value,
                 0x04,
                 0x00,
                 0xA4,
@@ -401,12 +419,12 @@ class TestExtensionDetection:
             + [0] * 15
         )
         real_read_until(
-            dev, opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value, 1000
+            dev, opcode.ACK_REPORT.value, 1000
         )
 
         dev.write(
             [
-                opcode.WRITE_MEMORY_AND_REGISTERS.value,
+                opcode.WRITE_REGISTERS.value,
                 0x04,
                 0x00,
                 0xA6,
@@ -417,12 +435,12 @@ class TestExtensionDetection:
             + [0] * 15
         )
         real_read_until(
-            dev, opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value, 1000
+            dev, opcode.ACK_REPORT.value, 1000
         )
 
         dev.write(
             [
-                opcode.READ_MEMORY_AND_REGISTERS.value,
+                opcode.READ_REGISTERS.value,
                 0x04,
                 0xA6,
                 0x00,
@@ -433,7 +451,7 @@ class TestExtensionDetection:
         )
         real_r = real_read_until(
             dev,
-            opcode.READ_MEMORY_AND_REGISTERS_DATA.value,
+            opcode.READ_DATA.value,
             1500,
         )
         dev.close()
@@ -452,7 +470,7 @@ class TestExtensionDetection:
 
         sim.write(
             [
-                opcode.READ_MEMORY_AND_REGISTERS.value,
+                opcode.READ_REGISTERS.value,
                 0x04,
                 0xA6,
                 0x00,
@@ -465,15 +483,15 @@ class TestExtensionDetection:
         while (
             sim_r
             and sim_r[0]
-            == opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
+            == opcode.ACK_REPORT.value
         ):
             sim_r = sim.read(64)
         if not sim_r:
             pytest.skip("no MP-ID from simulator")
 
         # ── Compare structure ──
-        assert real_r[0] == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
-        assert sim_r[0] == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
+        assert real_r[0] == opcode.READ_DATA.value
+        assert sim_r[0] == opcode.READ_DATA.value
 
         # Address bytes 4-5 = lower 16 bits of the address (0x00FA for 0xA600FA)
         assert (real_r[4] << 8) | real_r[5] == 0x00FA
@@ -486,16 +504,13 @@ class TestExtensionDetection:
         # Real device may or may not have MP — just validate structure
         if any(b != 0x00 for b in real_id):
             assert len(real_id) >= 6
-            if (
-                real_id[:4] == MOTION_PLUS_ID_PREFIX
-                or real_id[:4] == MOTION_PLUS_ID_PREFIX_TR
-            ):
+            if real_id[:4] in MOTION_PLUS_ID_PREFIXES:
                 pass  # valid MP ID
 
         # Simulator has MP hardware → must have non-zero ID
         assert sim._motion_plus_hardware_present
         assert any(b != 0x00 for b in sim_id)
-        assert sim_id[:4] == MOTION_PLUS_ID_PREFIX
+        assert sim_id[:4] in MOTION_PLUS_ID_PREFIXES
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -524,13 +539,13 @@ class TestMotionPlusStream:
         rid = None
         while time.monotonic() - start_t < 2.0:
             rid = wm_real.read(200)
-            if rid == opcode.READ_MEMORY_AND_REGISTERS_DATA.value:
+            if rid == opcode.READ_DATA.value:
                 break
         mp_id = b""
-        if rid == opcode.READ_MEMORY_AND_REGISTERS_DATA.value:
+        if rid == opcode.READ_DATA.value:
             mp_id = bytes(wm_real.memory_data.get(MOTION_PLUS_ID_ADDRESS & 0xFFFF, []))
 
-        if mp_id[:4] != MOTION_PLUS_ID_PREFIX and mp_id[:4] != MOTION_PLUS_ID_PREFIX_TR:
+        if mp_id[:4] not in MOTION_PLUS_ID_PREFIXES:
             dev.close()
             pytest.skip(
                 "no MotionPlus detected on real device {} {}".format(mp_id.hex(), rid)
@@ -620,7 +635,7 @@ class TestLowlevelWiimote:
         )
         dev.write(
             [
-                opcode.WRITE_MEMORY_AND_REGISTERS.value,
+                opcode.WRITE_REGISTERS.value,
                 mm,
                 f1,
                 f2,
@@ -632,16 +647,16 @@ class TestLowlevelWiimote:
         )
         ack = real_read_until(
             dev,
-            opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value,
+            opcode.ACK_REPORT.value,
             1000,
         )
         dev.close()
         if not ack:
             pytest.skip("no ACK from real device")
 
-        assert ack[0] == opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
+        assert ack[0] == opcode.ACK_REPORT.value
         assert len(ack) >= 6
-        assert ack[3] == opcode.WRITE_MEMORY_AND_REGISTERS.value
+        assert ack[3] == opcode.WRITE_REGISTERS.value
         # The real Wiimote may return error code 7 for writes to certain
         # register addresses (e.g. camera registers at 0xA42000).
         assert 0 <= ack[4] <= 7
@@ -658,19 +673,19 @@ class TestLowlevelWiimote:
         wm.read_memory(0x16, 6)
         real_r = real_read_until(
             dev,
-            opcode.READ_MEMORY_AND_REGISTERS_DATA.value,
+            opcode.READ_DATA.value,
             1500,
         )
         dev.close()
         if not real_r:
             pytest.skip("no read-memory from real device")
 
-        assert real_r[0] == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
+        assert real_r[0] == opcode.READ_DATA.value
         assert (real_r[4] << 8) | real_r[5] == 0x0016
 
         sim.write(
             [
-                opcode.READ_MEMORY_AND_REGISTERS.value,
+                opcode.READ_REGISTERS.value,
                 0x00,
                 0x00,
                 0x00,
@@ -683,13 +698,13 @@ class TestLowlevelWiimote:
         while (
             sim_r
             and sim_r[0]
-            == opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
+            == opcode.ACK_REPORT.value
         ):
             sim_r = sim.read(64)
         if not sim_r:
             pytest.skip("no read from simulator")
 
-        assert sim_r[0] == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
+        assert sim_r[0] == opcode.READ_DATA.value
         assert (sim_r[4] << 8) | sim_r[5] == 0x0016
 
 
@@ -847,7 +862,7 @@ class TestSimulatorUnit:
         dev.set_leds(0x0C)
         dev.set_extension_connected(True)
 
-        dev.write([opcode.STATUS_INFORMATION_REQUEST.value, 0x00])
+        dev.write([opcode.STATUS_REQUEST.value, 0x00])
 
         # Read the status report
         res = dev.read(64)
@@ -861,7 +876,7 @@ class TestSimulatorUnit:
 
         # Status request with extension NOT connected
         dev.set_extension_connected(False)
-        dev.write([opcode.STATUS_INFORMATION_REQUEST.value, 0x00])
+        dev.write([opcode.STATUS_REQUEST.value, 0x00])
         res = dev.read(64)
         assert res[3] == 0xC0
         dev.close()
@@ -874,7 +889,7 @@ class TestSimulatorUnit:
         # Writing 0x55 to MOTION_PLUS_INIT_ADDRESS
         dev.write(
             [
-                opcode.WRITE_MEMORY_AND_REGISTERS.value,
+                opcode.WRITE_REGISTERS.value,
                 0x04,
                 (MOTION_PLUS_INIT_ADDRESS >> 16) & 0xFF,
                 (MOTION_PLUS_INIT_ADDRESS >> 8) & 0xFF,
@@ -890,7 +905,7 @@ class TestSimulatorUnit:
         # Writing 0x04 to MOTION_PLUS_ACTIVATE_ADDRESS
         dev.write(
             [
-                opcode.WRITE_MEMORY_AND_REGISTERS.value,
+                opcode.WRITE_REGISTERS.value,
                 0x04,
                 (MOTION_PLUS_ACTIVATE_ADDRESS >> 16) & 0xFF,
                 (MOTION_PLUS_ACTIVATE_ADDRESS >> 8) & 0xFF,
@@ -907,7 +922,7 @@ class TestSimulatorUnit:
         # Writing 0x55 to EXTENSION_INIT_ENABLE_ADDRESS should deactivate MP active
         dev.write(
             [
-                opcode.WRITE_MEMORY_AND_REGISTERS.value,
+                opcode.WRITE_REGISTERS.value,
                 0x04,
                 (EXTENSION_INIT_ENABLE_ADDRESS >> 16) & 0xFF,
                 (EXTENSION_INIT_ENABLE_ADDRESS >> 8) & 0xFF,

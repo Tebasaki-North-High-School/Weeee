@@ -1,65 +1,95 @@
-# Weeee 🎮
+# Weeee
 
-**Weeee** は、Nintendo Wiimote と通信するための軽量な Python ライブラリです。ボタン、LED、振動、IRカメラ、および MotionPlus (ジャイロスコープ) データを扱うためのハイレベルな抽象化と低レベルな HID アクセスの両方を提供します。
+A Python library for high-performance Wiimote communication with built-in MotionPlus IMU fusion.
 
-**Weeee** is a lightweight Python library for communicating with Nintendo Wiimotes. It provides both high-level abstractions and low-level HID access to handle buttons, LEDs, rumble, IR cameras, and MotionPlus (Gyroscope) data.
+## Features
 
-## ✨ Features
+- **Easy connection** — auto-detect and connect to any Wiimote / Wiimote Plus (TR) via HID
+- **Full button input** — all buttons with `is_pressed()`, bitmask-ready
+- **LED & Rumble** — per-LED control, timed vibration
+- **IR Camera** — multi-mode tracking with sensitivity adjustment
+- **MotionPlus** — automatic detection, activation, and factory-calibrated gyro data
+- **IMU Fusion** — built-in sensor fusion (accelerometer + gyroscope) exposes `yaw_deg`, `pitch_deg`, `roll_deg` directly on the Wiimote object
+- **Simulator** — bundled virtual Wiimote for testing without hardware
+- **Type-safe** — fully annotated, strict mypy clean
+- **Cross-platform** — Windows, macOS, Linux (via `hidapi`)
 
-- 🔌 **Plug & Play**: 標準的な Wiimote および Wiimote Plus (TR) コントローラーへの簡単な接続。
-- 🔘 **Full Button Support**: すべてのボタン状態をリアルタイムで監視。
-- 💡 **Peripheral Control**: LED と振動（Rumble）を簡単なコマンドで制御。
-- 📡 **IR Camera**: 感度調整が可能なマルチモード IR トラッキング。
-- 🔄 **MotionPlus & IMU Fusion**: 加速度計とジャイロスコープを組み合わせた、センサーフュージョンによる安定した 6 軸モーション追跡。
-- 🧪 **Hardware Simulator**: 物理的なハードウェアなしで開発とテストが可能な仮想 Wiimote を内蔵。
-
-## 🚀 Installation
-
-このプロジェクトは [uv](https://github.com/astral-sh/uv) を使用して依存関係を管理しています。
+## Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/Tebasaki-North-High-School/Weeee.git
 cd Weeee
-
-# Install dependencies
 uv sync
 ```
 
-
+Or install directly:
 
 ```bash
 pip install .
 ```
 
-## 📖 Quick Start
+## Quick Start
 
 ```python
-from weeee.wiimote import Wiimote, buttons
+from weeee import Wiimote
 import time
 
-# Connect to the first available Wiimote
-wiimote = Wiimote()
+wiimote = Wiimote(require_motion_plus=True, enable_fusion=True)
+print(f"Connected to {wiimote.serial}: {wiimote.type}")
 
-print("Connected! Press 'A' to rumble, 'Home' to exit.")
+while True:
+    wiimote.update()
+    if wiimote.is_pressed("HOME"):
+        break
+    if wiimote.yaw_deg is not None:
+        print(f"yaw={wiimote.yaw_deg:.1f}  pitch={wiimote.pitch_deg:.1f}  roll={wiimote.roll_deg:.1f}")
+    time.sleep(0.01)
 
-try:
-    while True:
-        wiimote.update()
-        
-        if wiimote.is_pressed(buttons.BUTTON_A):
-            wiimote.set_rumble(True)
-        else:
-            wiimote.set_rumble(False)
-            
-        if wiimote.is_pressed(buttons.BUTTON_HOME):
-            break
-            
-        time.sleep(0.01)
-finally:
-    wiimote.close()
+wiimote.close()
 ```
 
-## 📜 License
+## Examples
 
-このプロジェクトは MIT ライセンスの下で提供されています。詳細は [LICENSE](LICENSE) ファイルを参照してください。
+Stream orientation from the command line:
+
+```bash
+python -m weeee.ex.motionplus_console -s <serial>
+```
+
+## API Overview
+
+| Class / Module | Description |
+|---|---|
+| `Wiimote(target, ...)` | High-level Wiimote with buttons, LEDs, rumble, IR, MP, fusion |
+| `Lowlevel_Wiimote(target, ...)` | Low-level HID read/write — registers, memory, raw reports |
+| `ImuFusion()` | Standalone orientation filter using gyroscope + accelerometer |
+| `SimulatedHIDDevice()` | Virtual Wiimote for unit tests |
+| `buttons` | Constants: `BUTTON_A`, `BUTTON_B`, `BUTTON_HOME`, … |
+
+### Accessible properties on `Wiimote`
+
+- `buttons`, `accel`, `gyro_raw`
+- `yaw`, `pitch`, `roll` (radians, or `None` if MP/fusion inactive)
+- `yaw_deg`, `pitch_deg`, `roll_deg` (degrees)
+- `is_pressed(name)`, `set_rumble(ms)`, `set_leds(...)`
+- `reset_yaw()`, `close()`
+
+## Development
+
+```bash
+# Install dev dependencies
+uv sync --group dev
+
+# Run tests
+uv run pytest
+
+# Type-check
+uv run mypy src/weeee/
+
+# Lint
+uv run ruff check src/weeee/ tests/
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

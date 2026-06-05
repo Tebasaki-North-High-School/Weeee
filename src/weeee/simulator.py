@@ -127,6 +127,31 @@ class SimulatedHIDDevice(hid.device):
                 0x00,
                 0x05,
             ]
+            # Factory calibration at 0xA60020 (32 bytes)
+            # FAST block: zeros=0x1F40 (8000), scales=0x0CE4 (3300), deg6=200
+            # SLOW block: zeros=0x2000 (8192), scales=0x0CE4 (3300), deg6=45
+            self.memory[0xA60020 : 0xA60020 + 32] = [
+                # FAST (offset 0x00)
+                0x1F, 0x40,  # yaw_zero
+                0x1F, 0x40,  # roll_zero
+                0x1F, 0x40,  # pitch_zero
+                0x0C, 0xE4,  # yaw_scale
+                0x0C, 0xE4,  # roll_scale
+                0x0C, 0xE4,  # pitch_scale
+                200,         # degrees_div_6
+                0x01,        # UID
+                0x00, 0x00,  # CRC
+                # SLOW (offset 0x10)
+                0x20, 0x00,  # yaw_zero
+                0x20, 0x00,  # roll_zero
+                0x20, 0x00,  # pitch_zero
+                0x0C, 0xE4,  # yaw_scale
+                0x0C, 0xE4,  # roll_scale
+                0x0C, 0xE4,  # pitch_scale
+                45,          # degrees_div_6
+                0x00,        # UID
+                0x00, 0x00,  # CRC
+            ]
         else:
             self.memory[MOTION_PLUS_ID_ADDRESS : MOTION_PLUS_ID_ADDRESS + 6] = [
                 0x00
@@ -212,10 +237,10 @@ class SimulatedHIDDevice(hid.device):
             self._continuous_reporting = bool(payload[0] & 0x04)
             self._reporting_mode = payload[1]
             self._rumble = bool(payload[0] & 0x01)
-        elif report_id == opcode.STATUS_INFORMATION_REQUEST.value:
+        elif report_id == opcode.STATUS_REQUEST.value:
             self._rumble = bool(payload[0] & 0x01)
             self._enqueue_status_report()
-        elif report_id == opcode.WRITE_MEMORY_AND_REGISTERS.value:
+        elif report_id == opcode.WRITE_REGISTERS.value:
             self._rumble = bool(payload[0] & 0x01)
             addr = (payload[1] << 16) | (payload[2] << 8) | payload[3]
             size = payload[4]
@@ -256,7 +281,7 @@ class SimulatedHIDDevice(hid.device):
                 # Writing 0x55 to 0xA400F0 deactivates external MotionPlus
                 self.set_motion_plus_active(False)
 
-        elif report_id == opcode.READ_MEMORY_AND_REGISTERS.value:
+        elif report_id == opcode.READ_REGISTERS.value:
             self._rumble = bool(payload[0] & 0x01)
             addr = (payload[1] << 16) | (payload[2] << 8) | payload[3]
             size = (payload[4] << 8) | payload[5]
@@ -284,7 +309,7 @@ class SimulatedHIDDevice(hid.device):
         while (
             self.response_queue
             and self.response_queue[0][0]
-            == opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
+            == opcode.ACK_REPORT.value
         ):
             self.response_queue.pop(0)
 
@@ -312,7 +337,7 @@ class SimulatedHIDDevice(hid.device):
     def _enqueue_ack(self, report_id: int, error_code: int) -> None:
         """Enqueues an acknowledgment report (0x22) into the response queue."""
         report = [0] * 6
-        report[0] = opcode.ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT.value
+        report[0] = opcode.ACK_REPORT.value
         report[1] = (self._buttons >> 8) & 0xFF
         report[2] = self._buttons & 0xFF
         report[3] = report_id
@@ -326,7 +351,7 @@ class SimulatedHIDDevice(hid.device):
         while remaining > 0:
             chunk_size = min(remaining, 16)
             report = [0] * 22
-            report[0] = opcode.READ_MEMORY_AND_REGISTERS_DATA.value
+            report[0] = opcode.READ_DATA.value
             report[1] = (self._buttons >> 8) & 0xFF
             report[2] = self._buttons & 0xFF
             report[3] = (chunk_size - 1) << 4

@@ -8,6 +8,7 @@ import hid
 
 from typing import Optional
 from enum import Enum
+from .imu_fusion import ImuFusion
 
 # Vendor ID (Nintendo)
 VENDOR_ID = 0x057E
@@ -46,17 +47,17 @@ class opcode(Enum):
     DATA_REPORTING_MODE = 0x12
     IR_CAMERA_ENABLE = 0x13
     SPEAKER_ENABLE = 0x14
-    STATUS_INFORMATION_REQUEST = 0x15
-    WRITE_MEMORY_AND_REGISTERS = 0x16
-    READ_MEMORY_AND_REGISTERS = 0x17
+    STATUS_REQUEST = 0x15
+    WRITE_REGISTERS = 0x16
+    READ_REGISTERS = 0x17
     SPEAKER_DATA = 0x18
     SPEAKER_MUTE = 0x19
     IR_CAMERA_ENABLE_2 = 0x1A
 
     # Input report
     STATUS_INFORMATION = 0x20
-    READ_MEMORY_AND_REGISTERS_DATA = 0x21
-    ACKNOWLEDGE_OUTPUT_REPORT_RETURN_FUNCTION_RESULT = 0x22
+    READ_DATA = 0x21
+    ACK_REPORT = 0x22
 
     # Data reports
     DATA_30 = 0x30
@@ -67,7 +68,7 @@ class opcode(Enum):
     DATA_35 = 0x35
     DATA_36 = 0x36
     DATA_37 = 0x37
-    DATA_3d = 0x3D
+    DATA_3D = 0x3D
     DATA_3e = 0x3E
     DATA_3f = 0x3F
 
@@ -86,12 +87,16 @@ EXTENSION_ID_ADDRESS = 0xA400FA
 MOTION_PLUS_INIT_ADDRESS = 0xA600F0
 MOTION_PLUS_ID_ADDRESS = 0xA600FA
 MOTION_PLUS_ACTIVATE_ADDRESS = 0xA600FE
-MOTION_PLUS_ID_PREFIX = bytes([0x00, 0x00, 0xA6, 0x20])
-MOTION_PLUS_ID_PREFIX_TR = bytes([0x01, 0x00, 0xA6, 0x20])
+MOTION_PLUS_ID_PREFIXES: tuple[bytes, ...] = (
+    bytes([0x00, 0x00, 0xA6, 0x20]),
+    bytes([0x01, 0x00, 0xA6, 0x20]),
+)
 MOTION_PLUS_ACTIVE_ID = bytes([0x00, 0x00, 0xA4, 0x20, 0x04, 0x05])
 MOTION_PLUS_ACTIVE_ID_TR = bytes([0x01, 0x00, 0xA4, 0x20, 0x04, 0x05])
 MOTION_PLUS_INACTIVE_ID = bytes([0x00, 0x00, 0xA6, 0x20, 0x00, 0x05])
 MOTION_PLUS_ACTIVE_REPORT_LENGTH = 6
+MOTION_PLUS_CALIBRATION_ADDRESS = 0xA60020
+MOTION_PLUS_CALIBRATION_SIZE = 32
 
 
 class Lowlevel_Wiimote:
@@ -119,7 +124,18 @@ class Lowlevel_Wiimote:
             if isinstance(target, bytes):
                 self.device.open_path(target)
             elif isinstance(target, str):
-                self.device.open(serial_number=target)
+                # hidapi crashes with serial_number on some platforms; resolve
+                # to path via enumerate.
+                for d in hid.enumerate(VENDOR_ID):
+                    if d["product_id"] not in (PRODUCT_ID, PRODUCT_ID_TR):
+                        continue
+                    if d.get("serial_number") == target:
+                        self.device.open_path(d["path"])
+                        break
+                else:
+                    raise ConnectionError(
+                        f"Wiimote with serial '{target}' not found"
+                    )
 
         self.is_rumble = False
         self.buttons = 0
@@ -197,7 +213,7 @@ class Lowlevel_Wiimote:
     def request_status(self) -> None:
         """Requests a status report from the Wiimote."""
         self._send_report(
-            opcode.STATUS_INFORMATION_REQUEST.value, (0x01 if self.is_rumble else 0x00)
+            opcode.STATUS_REQUEST.value, (0x01 if self.is_rumble else 0x00)
         )
 
     def write_register(self, address: int, data: int | bytes | list[int]) -> None:
@@ -219,7 +235,7 @@ class Lowlevel_Wiimote:
             addr = address + i
             f1, f2, f3 = (addr >> 16) & 0xFF, (addr >> 8) & 0xFF, addr & 0xFF
             self.device.write(
-                [opcode.WRITE_MEMORY_AND_REGISTERS.value, mm, f1, f2, f3, size]
+                [opcode.WRITE_REGISTERS.value, mm, f1, f2, f3, size]
                 + payload
             )
             time.sleep(0.05)
@@ -239,7 +255,7 @@ class Lowlevel_Wiimote:
         f1, f2, f3 = (address >> 16) & 0xFF, (address >> 8) & 0xFF, address & 0xFF
         s1, s2 = (size >> 8) & 0xFF, size & 0xFF
         self._send_report(
-            opcode.READ_MEMORY_AND_REGISTERS.value, mm, f1, f2, f3, s1, s2
+            opcode.READ_REGISTERS.value, mm, f1, f2, f3, s1, s2
         )
 
     def init_ir(self, mode: int = 3, sensitivity: int = 3) -> None:
@@ -288,14 +304,14 @@ class Lowlevel_Wiimote:
         report_id = data[0]
 
         # All reports except 0x3d contain button data in bytes 1-2
-        if report_id != opcode.DATA_3d.value:
+        if report_id != opcode.DATA_3D.value:
             self.buttons = (data[1] << 8) | data[2]
 
         if report_id == opcode.STATUS_INFORMATION.value:
             self.leds = (data[3] >> 4) & 0x0F
             self.extension_connected = bool(data[3] & 0x02)
             self.battery = data[6]
-        elif report_id == opcode.READ_MEMORY_AND_REGISTERS_DATA.value:
+        elif report_id == opcode.READ_DATA.value:
             size = (data[3] >> 4) + 1
             addr = (data[4] << 8) | data[5]
             self.memory_data[addr] = list(data[6 : 6 + size])
@@ -325,7 +341,7 @@ class Lowlevel_Wiimote:
             self._parse_ir_basic(data[6:16])
             self.extension = bytes(data[16:22])
             self._extension_fresh = True
-        elif report_id == opcode.DATA_3d.value:
+        elif report_id == opcode.DATA_3D.value:
             self.extension = bytes(data[1:22])
             self._extension_fresh = True
         elif report_id in (opcode.DATA_3e.value, opcode.DATA_3f.value):
@@ -405,6 +421,7 @@ class Wiimote(Lowlevel_Wiimote):
         target: Optional[str | bytes] = None,
         require_motion_plus: bool = False,
         device: Optional[hid.device] = None,
+        enable_fusion: bool = True,
     ) -> None:
         """
         Initializes the Wiimote.
@@ -413,6 +430,7 @@ class Wiimote(Lowlevel_Wiimote):
             target: HID path or serial number. If None, finds the first available Wiimote.
             require_motion_plus: If True, attempts to activate MotionPlus and raises error if it fails.
             device: Optional existing hid.device instance.
+            enable_fusion: If True, creates an internal ImuFusion instance and auto-updates it.
         """
         detected_product_id: Optional[int] = None
         if device is None and target is None:
@@ -427,6 +445,18 @@ class Wiimote(Lowlevel_Wiimote):
             detected_product_id = matches[0]["product_id"]
         elif device is not None:
             detected_product_id = PRODUCT_ID
+        elif target is not None:
+            # target explicitly given — find product_id and resolve to path
+            devices = hid.enumerate(VENDOR_ID)
+            for d in devices:
+                if d["product_id"] not in (PRODUCT_ID, PRODUCT_ID_TR):
+                    continue
+                if (isinstance(target, bytes) and d["path"] == target) or (
+                    isinstance(target, str) and d.get("serial_number") == target
+                ):
+                    detected_product_id = d["product_id"]
+                    target = d["path"]  # resolve to path for parent
+                    break
 
         super().__init__(target, device=device)
         self.product_id = detected_product_id
@@ -437,8 +467,11 @@ class Wiimote(Lowlevel_Wiimote):
         self.motion_plus_activated = False
         self.gyro_raw = {"yaw": 0, "roll": 0, "pitch": 0}
         self.gyro_slow = {"yaw": True, "roll": True, "pitch": True}
-        self.gyro_signs = {"yaw": 1.0, "roll": 1.0, "pitch": 1.0}
         self.motion_plus_extension_connected = False
+        self.mp_cal_fast: Optional[dict[str, int]] = None
+        self.mp_cal_slow: Optional[dict[str, int]] = None
+        self.fusion: Optional[ImuFusion] = None
+        self._fusion_last_time: float = 0.0
 
         # Initial status and mode
         self.request_status()
@@ -449,10 +482,20 @@ class Wiimote(Lowlevel_Wiimote):
         if require_motion_plus:
             self.require_motion_plus()
 
+        # Init internal fusion
+        if enable_fusion:
+            self.fusion = ImuFusion()
+            if self.mp_cal_fast is not None:
+                self.fusion.set_calibration(self.mp_cal_fast, self.mp_cal_slow)  # type: ignore[unreachable]
+            self._fusion_last_time = time.monotonic()
+
     @staticmethod
     def is_motion_plus_id(extension_id: bytes) -> bool:
         """Checks if the extension ID matches a MotionPlus in inactive state."""
-        return len(extension_id) == 6 and extension_id[:4] == MOTION_PLUS_ID_PREFIX
+        return (
+            len(extension_id) == 6
+            and extension_id[:4] in MOTION_PLUS_ID_PREFIXES
+        )
 
     @staticmethod
     def is_motion_plus_active_id(extension_id: bytes) -> bool:
@@ -525,20 +568,23 @@ class Wiimote(Lowlevel_Wiimote):
     def _read_memory_block(
         self, address: int, size: int, timeout_s: float = 1.0
     ) -> bytes:
-        """Reads a block of memory synchronously."""
+        """Reads a block of memory synchronously, handling multi-chunk responses."""
         self.read_memory(address, size)
         low_addr = address & 0xFFFF
+        buf: dict[int, bytes] = {}
         start_time = time.time()
         while time.time() - start_time < timeout_s:
             rid = self.read(50)
-            if (
-                rid == opcode.READ_MEMORY_AND_REGISTERS_DATA.value
-                and low_addr in self.memory_data
-            ):
-                data = self.memory_data.pop(low_addr)
-                return bytes(data[:size])
+            if rid == opcode.READ_DATA.value:
+                for a, d in self.memory_data.items():
+                    if low_addr <= a < low_addr + size:
+                        buf[a] = bytes(d)
+                self.memory_data.clear()
+                collected = b"".join(buf[k] for k in sorted(buf))
+                if len(collected) >= size:
+                    return collected[:size]
             time.sleep(0.01)
-        return b""
+        return b"".join(buf[k] for k in sorted(buf))
 
     def _initialize_extension_port(self) -> None:
         """Initializes the extension port for non-encrypted communication."""
@@ -634,6 +680,11 @@ class Wiimote(Lowlevel_Wiimote):
                 "Wii MotionPlus is required, but no supported extension was found"
             )
 
+        # キャリブレーションデータは 0xA6 領域が読めるうちに取得
+        # （activation 後は 0xA6 レジスタが非アクセスになる）
+        if not self.motion_plus_activated:
+            self._load_motion_plus_calibration()
+
         if self.motion_plus_activated:
             self.set_reporting_mode(opcode.DATA_35.value, continuous=True)
             return extension_id
@@ -662,7 +713,7 @@ class Wiimote(Lowlevel_Wiimote):
         start_time = time.time()
         while time.time() - start_time < 2.0:
             rid = self.read(10)
-            if rid == opcode.READ_MEMORY_AND_REGISTERS_DATA.value:
+            if rid == opcode.READ_DATA.value:
                 if 0x16 in self.memory_data:
                     data = self.memory_data[0x16]
                     if len(data) >= 8:
@@ -678,6 +729,39 @@ class Wiimote(Lowlevel_Wiimote):
                         )
                         break
             time.sleep(0.01)
+
+    def _load_motion_plus_calibration(self) -> None:
+        """Reads MotionPlus factory calibration from 0xA60020 (32 bytes)."""
+        raw = self._read_memory_block(
+            MOTION_PLUS_CALIBRATION_ADDRESS,
+            MOTION_PLUS_CALIBRATION_SIZE,
+            timeout_s=2.0,
+        )
+        if len(raw) < 32:
+            self.mp_cal_fast = None
+            self.mp_cal_slow = None
+            return
+        self.mp_cal_fast = {
+            "yaw_zero": (raw[0] << 8) | raw[1],
+            "roll_zero": (raw[2] << 8) | raw[3],
+            "pitch_zero": (raw[4] << 8) | raw[5],
+            "yaw_scale": (raw[6] << 8) | raw[7],
+            "roll_scale": (raw[8] << 8) | raw[9],
+            "pitch_scale": (raw[10] << 8) | raw[11],
+            "degrees_div_6": raw[12],
+        }
+        self.mp_cal_slow = {
+            "yaw_zero": (raw[16] << 8) | raw[17],
+            "roll_zero": (raw[18] << 8) | raw[19],
+            "pitch_zero": (raw[20] << 8) | raw[21],
+            "yaw_scale": (raw[22] << 8) | raw[23],
+            "roll_scale": (raw[24] << 8) | raw[25],
+            "pitch_scale": (raw[26] << 8) | raw[27],
+            "degrees_div_6": raw[28],
+        }
+        # 既に fusion があれば反映
+        if self.fusion is not None:
+            self.fusion.set_calibration(self.mp_cal_fast, self.mp_cal_slow)
 
     def rumble_ms(self, duration_ms: int) -> None:
         """
@@ -696,7 +780,7 @@ class Wiimote(Lowlevel_Wiimote):
     def update(self, timeout: int = 0) -> Optional[int]:
         """
         Updates the Wiimote state by reading the next report.
-        Also handles rumble timing.
+        Also handles rumble timing and IMU fusion (if enabled).
 
         Args:
             timeout: Timeout in milliseconds.
@@ -720,6 +804,12 @@ class Wiimote(Lowlevel_Wiimote):
                     decoded["extension_connected"]
                 )
                 self._extension_fresh = False
+                if self.fusion is not None:
+                    now = time.monotonic()
+                    dt = now - self._fusion_last_time if self._fusion_last_time > 0 else 0.02
+                    self._fusion_last_time = now
+                    gx, gy, gz = self.gforce
+                    self.fusion.update(gx, gy, gz, self.gyro_raw, dt, self.gyro_slow)
         if self.rumble_end_time is not None:
             if time.time() >= self.rumble_end_time:
                 self.rumble(False)
@@ -756,3 +846,38 @@ class Wiimote(Lowlevel_Wiimote):
         if isinstance(mask, int):
             return bool(self.buttons & mask)
         return bool(self.buttons & mask.value)
+
+    @property
+    def yaw(self) -> float:
+        """Current yaw in radians (requires fusion enabled)."""
+        return float(self.fusion.yaw) if self.fusion is not None else 0.0
+
+    @property
+    def pitch(self) -> float:
+        """Current pitch in radians (requires fusion enabled)."""
+        return float(self.fusion.pitch) if self.fusion is not None else 0.0
+
+    @property
+    def roll(self) -> float:
+        """Current roll in radians (requires fusion enabled)."""
+        return float(self.fusion.roll) if self.fusion is not None else 0.0
+
+    @property
+    def yaw_deg(self) -> float:
+        """Current yaw in degrees (requires fusion enabled)."""
+        return float(self.fusion.yaw_deg) if self.fusion is not None else 0.0
+
+    @property
+    def pitch_deg(self) -> float:
+        """Current pitch in degrees (requires fusion enabled)."""
+        return float(self.fusion.pitch_deg) if self.fusion is not None else 0.0
+
+    @property
+    def roll_deg(self) -> float:
+        """Current roll in degrees (requires fusion enabled)."""
+        return float(self.fusion.roll_deg) if self.fusion is not None else 0.0
+
+    def reset_yaw(self) -> None:
+        """Resets the yaw heading to zero (requires fusion enabled)."""
+        if self.fusion is not None:
+            self.fusion.reset_yaw()
